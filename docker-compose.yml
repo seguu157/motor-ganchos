@@ -1,0 +1,18 @@
+services:
+  radar:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      RADAR_DB: /data/radar.sqlite
+      RADAR_HOST: 0.0.0.0
+      RADAR_PORT: "8000"
+      HF_HOME: /data/huggingface
+    volumes:
+      - radar-data:/data
+    restart: unless-stopped
+
+volumes:
+  radar-data:

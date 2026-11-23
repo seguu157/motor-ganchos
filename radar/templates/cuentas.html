@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">Watchlist</p>
+  <h1>Cuentas que vigila el radar</h1>
+  <p class="lede">Cada tanda pide unos 20 reels recientes por cuenta activa. Pausar una cuenta la deja fuera de la siguiente ingesta.</p>
+</section>
+
+<form class="add-account" method="post" action="/cuentas">
+  <label>Usuario o URL del perfil
+    <input name="username" required placeholder="@cuenta o instagram.com/cuenta" autocomplete="off">
+  </label>
+  <button type="submit">Añadir</button>
+</form>
+
+<ul class="account-list">
+  {% for row in rows %}
+  <li>
+    <div>
+      <strong>@{{ row.username }}</strong>
+      <span class="chip {% if row.active %}{% else %}quiet{% endif %}">{{ "activa" if row.active else "pausada" }}</span>
+    </div>
+    <div class="row-actions">
+      <form method="post" action="/cuentas/{{ row.username }}/estado">
+        <input type="hidden" name="active" value="{{ 0 if row.active else 1 }}">
+        <button type="submit" class="ghost">{{ "Pausar" if row.active else "Activar" }}</button>
+      </form>
+      <form method="post" action="/cuentas/{{ row.username }}/borrar">
+        <button type="submit" class="ghost danger">Quitar</button>
+      </form>
+    </div>
+  </li>
+  {% else %}
+  <li class="empty">No hay cuentas. Añade la primera o ejecuta <code>radar seed</code>.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

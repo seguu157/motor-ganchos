@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block extra_head %}
+{% if running %}
+<meta http-equiv="refresh" content="5">
+{% endif %}
+{% endblock %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">Antes de gastar crédito</p>
+  <h1>Estimación de la tanda</h1>
+  <p class="lede">Actor <code>apify/instagram-reel-scraper</code>, solo metadatos. La transcripción de Apify, la descarga de vídeo y los compartidos van apagados: se cobran aparte. Esto es una estimación, no un cargo ni el saldo de tu cuenta.</p>
+</section>
+
+{% if error %}
+<p class="warn" role="alert">{{ error }}</p>
+{% endif %}
+{% if last_error %}
+<p class="warn" role="alert">{{ last_error }}</p>
+{% endif %}
+
+{% if estimate %}
+<form class="receipt" method="get" action="/radar">
+  <label>Reels por cuenta
+    <input type="number" name="reels" min="1" max="50" value="{{ reels }}">
+  </label>
+  <button type="submit" class="ghost">Recalcular</button>
+</form>
+
+<section class="receipt" aria-label="Estimación">
+  <dl>
+    <div><dt>Cuentas activas</dt><dd>{{ estimate.accounts }}</dd></div>
+    <div><dt>Reels por cuenta</dt><dd>{{ estimate.reels_per_account }}</dd></div>
+    <div><dt>Resultados previstos</dt><dd>{{ estimate.reels_total }}</dd></div>
+    <div><dt>Tarifa de referencia</dt><dd>{{ estimate.usd_per_1000|usd }} / 1.000</dd></div>
+    <div class="total"><dt>Esta tanda</dt><dd>{{ estimate.estimated_usd|usd }}</dd></div>
+    <div><dt>Crédito mensual Free</dt><dd>{{ estimate.monthly_credit_usd|usd }}</dd></div>
+    <div><dt>Tandas que caben</dt><dd>{{ estimate.runs_fitting_in_credit }}</dd></div>
+    <div><dt>Proyección de 4 al mes</dt><dd>{{ estimate.monthly_projection_usd|usd }}</dd></div>
+    <div><dt>Reels que caben en el crédito</dt><dd>{{ estimate.reels_fitting_in_credit|es_int }}</dd></div>
+  </dl>
+  <p class="fine">Tarifa publicada del plan Free del actor: 2,60 USD por cada 1.000 reels y 5 USD de crédito al mes. Si Apify cambia el precio, ajústalo con APIFY_USD_PER_1000. La proyección semanal no es un cargo.</p>
+  <ul class="who">
+    {% for username in usernames %}
+    <li>@{{ username }}</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<form class="launch" method="post" action="/radar/lanzar">
+  <input type="hidden" name="reels" value="{{ reels }}">
+  <label class="check">
+    <input type="checkbox" name="confirmo" value="1" required>
+    He visto la estimación y quiero lanzar la ingesta de metadatos.
+  </label>
+  {% if estimate.over_budget %}
+  <label class="check">
+    <input type="checkbox" name="allow_over_budget" value="1">
+    Esta tanda supera el crédito de referencia. La lanzo igualmente.
+  </label>
+  {% endif %}
+  <button type="submit" {% if not token_listo %}disabled{% endif %}>Lanzar ingesta</button>
+  {% if not token_listo %}
+  <p class="fine">Falta APIFY_TOKEN. El botón no llama a Apify.</p>
+  {% endif %}
+</form>
+{% endif %}
+
+{% if running %}
+<p class="banner">Hay una ingesta en curso desde {{ running.started_at|es_date }}. Esta página se refresca sola.</p>
+{% endif %}
+
+{% if runs %}
+<section>
+  <h2>Últimas tandas</h2>
+  <ul class="reel-list">
+    {% for run in runs %}
+    <li>
+      <div>
+        <strong>{{ run.status }}</strong>
+        <time>{{ run.started_at|es_date }}</time>
+      </div>
+      <p>{{ run.reels_saved or 0 }} reels guardados · estimación {{ run.estimated_usd }} USD</p>
+      {% if run.message %}<p class="fine">{{ run.message }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

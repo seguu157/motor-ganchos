@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{ title }} · Radar de ganchos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,680&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/banco">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>
+        <strong>Radar</strong>
+        <small>Motor de ganchos</small>
+      </span>
+    </a>
+    <nav>
+      <a href="/banco" {% if nav == "banco" %}aria-current="page"{% endif %}>Banco</a>
+      <a href="/reels" {% if nav == "reels" %}aria-current="page"{% endif %}>Reels</a>
+      <a href="/cuentas" {% if nav == "cuentas" %}aria-current="page"{% endif %}>Cuentas</a>
+      <a href="/radar" {% if nav == "radar" %}aria-current="page"{% endif %}>Lanzar</a>
+      <a href="/ajustes" {% if nav == "ajustes" %}aria-current="page"{% endif %}>Ajustes</a>
+    </nav>
+  </header>
+  {% if aviso %}
+  <p class="toast" role="status">{{ aviso }}</p>
+  {% endif %}
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <p>Fase 1: outliers, formato y guion con [X]. El tablero y el teleprompter quedan para la fase 2.</p>
+  </footer>
+</body>
+</html>

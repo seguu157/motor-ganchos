@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">Banco de ganchos</p>
+  <h1>Reels que pasan de 2× la mediana</h1>
+  <p class="lede">De cada cuenta se miran los últimos 20 reels con reproducciones. Aquí solo entran los que al menos duplican esa mediana, con el gancho, la plantilla y un guion para Antonio.</p>
+</section>
+
+{% if hay_ejemplos %}
+<p class="banner">Datos de ejemplo. Las cifras, los pies y las transcripciones son ficticios: no son métricas ni textos reales de estas cuentas.</p>
+{% endif %}
+
+<form class="filters" method="get" action="/banco">
+  <label>Cuenta
+    <select name="cuenta">
+      <option value="">Todas</option>
+      {% for account in accounts %}
+      <option value="{{ account }}" {% if filtros.get("cuenta") == account %}selected{% endif %}>@{{ account }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Tipo de gancho
+    <select name="tipo">
+      <option value="">Todos</option>
+      {% for tipo in types %}
+      <option value="{{ tipo }}" {% if filtros.get("tipo") == tipo %}selected{% endif %}>{{ tipo }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Múltiplo mínimo
+    <select name="min">
+      <option value="">2×</option>
+      {% for value in ["3", "5", "10"] %}
+      <option value="{{ value }}" {% if filtros.get("min") == value %}selected{% endif %}>{{ value }}×</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Desde
+    <input type="date" name="desde" value="{{ filtros.get('desde', '') }}">
+  </label>
+  <label>Hasta
+    <input type="date" name="hasta" value="{{ filtros.get('hasta', '') }}">
+  </label>
+  <label class="check">
+    <input type="checkbox" name="ocultar_ejemplos" value="1" {% if filtros.get("ocultar_ejemplos") == "1" %}checked{% endif %}>
+    Ocultar ejemplos
+  </label>
+  <button type="submit">Filtrar</button>
+</form>
+
+<div class="export-row">
+  <p>{{ entries|length }} de {{ total }} ganchos</p>
+  <p class="links">
+    <a href="/export/banco.md{% if query %}?{{ query }}{% endif %}">Markdown</a>
+    <a href="/export/banco.json{% if query %}?{{ query }}{% endif %}">JSON</a>
+  </p>
+</div>
+
+{% if entries %}
+<ul class="cards">
+  {% for entry in entries %}
+  <li class="card" style="--account: {{ color(entry.account) }}">
+    <div class="card-top">
+      <a class="account" href="/banco?cuenta={{ entry.account }}">@{{ entry.account }}</a>
+      <time datetime="{{ entry.published_at or '' }}">{{ entry.published_at|es_date }}</time>
+    </div>
+    <p class="multiple {{ entry.multiple|heat }}">{{ entry.multiple|multiple }}</p>
+    <p class="hook">{{ entry.hook or "Pendiente de transcribir" }}</p>
+    <div class="chips">
+      {% if entry.hook_type %}<span class="chip">{{ entry.hook_type }}</span>{% endif %}
+      {% if entry.is_example %}<span class="chip example">ejemplo</span>{% endif %}
+    </div>
+    <div class="card-actions">
+      <a class="text-link" href="/banco/{{ entry.reel_id }}">Abrir ficha</a>
+      {% if entry.is_example %}
+      <span class="muted">Enlace de ejemplo</span>
+      {% else %}
+      <a class="text-link" href="{{ entry.url }}" target="_blank" rel="noreferrer">Reel original</a>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<section class="empty">
+  <h2>No hay ganchos con este filtro</h2>
+  <p>Un outlier necesita reproducciones iguales o superiores a 2× la mediana de los últimos 20 reels de su cuenta. Si aún no has lanzado el radar, los ejemplos aparecen al arrancar con la base vacía.</p>
+</section>
+{% endif %}
+{% endblock %}

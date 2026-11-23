@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">Configuración</p>
+  <h1>Variables de entorno</h1>
+  <p class="lede">Los secretos no se guardan en la base ni se muestran aquí. Solo verás si están definidos. Se cambian en el entorno del proceso o en el archivo .env, y hace falta reiniciar.</p>
+</section>
+
+<dl class="settings">
+  <div>
+    <dt>APIFY_TOKEN</dt>
+    <dd>{{ "definido" if token_listo else "no definido" }}</dd>
+  </div>
+  <div>
+    <dt>Actor</dt>
+    <dd>{{ settings.apify_actor }}</dd>
+  </div>
+  <div>
+    <dt>Reels por cuenta</dt>
+    <dd>{{ settings.reels_per_account }}</dd>
+  </div>
+  <div>
+    <dt>Umbral de outlier</dt>
+    <dd>{{ settings.outlier_multiple }}×</dd>
+  </div>
+  <div>
+    <dt>Tarifa de referencia</dt>
+    <dd>{{ settings.usd_per_1000|usd }} / 1.000 · crédito {{ settings.monthly_credit_usd|usd }}</dd>
+  </div>
+  <div>
+    <dt>Whisper</dt>
+    <dd>{{ settings.whisper_model }} · {{ settings.whisper_device }} · {{ settings.whisper_compute_type }} · {{ settings.whisper_language }}</dd>
+  </div>
+  <div>
+    <dt>LLM</dt>
+    <dd>{{ settings.llm_provider }}{% if settings.llm_model %} · {{ settings.llm_model }}{% endif %} · {{ "listo" if llm_listo else "no listo" }}</dd>
+  </div>
+  <div>
+    <dt>Base de datos</dt>
+    <dd>{{ settings.db_path }}</dd>
+  </div>
+  <div>
+    <dt>TubeAlfred</dt>
+    <dd>desactivado · clave {{ "definida" if tube.key_configured else "no definida" }}</dd>
+  </div>
+</dl>
+
+<section class="note">
+  <h2>TubeAlfred, apagado</h2>
+  <p>La variable <code>TUBEALFRED_API_KEY</code> está reservada para YouTube. El adaptador en <code>radar/tubealfred.py</code> está vacío: tener la clave no hace ninguna llamada. La mediana de YouTube no se mezcla con la de Instagram.</p>
+</section>
+
+<p class="links">
+  <a href="/export/banco.md">Descargar banco en Markdown</a>
+  <a href="/export/copia.json">Descargar copia JSON</a>
+</p>
+{% endblock %}

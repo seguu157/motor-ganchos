@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="back"><a href="/banco">← Banco</a></p>
+{% if entry.is_example %}
+<p class="banner">Ficha de ejemplo. La transcripción no sale de un audio real y el enlace no es un reel publicado.</p>
+{% endif %}
+
+<article class="sheet" style="--account: {{ color(entry.account) }}">
+  <header class="sheet-head">
+    <p class="eyebrow">@{{ entry.account }} · {{ entry.published_at|es_date }}</p>
+    <p class="multiple {{ entry.multiple|heat }}">{{ entry.multiple|multiple }}</p>
+    <h1>{{ entry.hook or "Pendiente de transcribir" }}</h1>
+    <div class="chips">
+      {% if entry.hook_type %}<span class="chip">{{ entry.hook_type }}</span>{% endif %}
+      {% if entry.is_example %}<span class="chip example">ejemplo</span>{% endif %}
+    </div>
+  </header>
+
+  <dl class="metrics">
+    <div><dt>Reproducciones</dt><dd>{{ entry.play_count|es_int }}</dd></div>
+    <div><dt>Mediana</dt><dd>{{ entry.median_plays|es_int }}</dd></div>
+    <div><dt>Me gusta</dt><dd>{{ entry.likes_count|es_int }}</dd></div>
+    <div><dt>Comentarios</dt><dd>{{ entry.comments_count|es_int }}</dd></div>
+  </dl>
+  <p class="fine">Mediana de {{ entry.sample_size or "—" }} reels con cifra (máximo los 20 más recientes). Se usa videoPlayCount, no las visualizaciones.</p>
+
+  <p class="origin">
+    {% if entry.is_example %}
+    Enlace de ejemplo, no es un reel real: <span>{{ entry.url }}</span>
+    {% else %}
+    <a href="{{ entry.url }}" target="_blank" rel="noreferrer">Abrir el reel original</a>
+    {% endif %}
+  </p>
+
+  <section>
+    <h2>Transcripción</h2>
+    {% if entry.transcript %}
+    <p class="prose">{{ entry.transcript }}</p>
+    {% elif entry.transcript_error %}
+    <p class="warn">{{ entry.transcript_error }}</p>
+    {% else %}
+    <p class="muted">Pendiente. Solo se transcriben los outliers, en local, con faster-whisper.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Formato</h2>
+    {% if entry.blocks %}
+    <ol class="steps">
+      {% for block in entry.blocks %}
+      <li>
+        <span>{{ block.id }}</span>
+        <p>{{ block.texto|gaps }}</p>
+        <small>En pantalla: {{ block.en_pantalla|gaps }}</small>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="muted">Pendiente de analizar.</p>
+    {% endif %}
+  </section>
+
+  <div class="split">
+    <section>
+      <h2>Plantilla</h2>
+      {% if entry.template %}
+      <pre class="prose">{{ entry.template|gaps }}</pre>
+      {% else %}
+      <p class="muted">Pendiente de analizar.</p>
+      {% endif %}
+    </section>
+    <section>
+      <h2>Guion adaptado</h2>
+      {% if entry.adapted_script %}
+      <pre class="prose script">{{ entry.adapted_script|gaps }}</pre>
+      {% elif entry.analysis_error %}
+      <p class="warn">{{ entry.analysis_error }}</p>
+      {% else %}
+      <p class="muted">Pendiente. El modelo tiene que dejar [X] donde haga falta una experiencia real, y no puede inventar cifras.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  {% if entry.warnings %}
+  <section>
+    <h2>Avisos</h2>
+    <ul class="warn-list">
+      {% for warning in entry.warnings %}
+      <li>{{ warning }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if entry.caption %}
+  <section>
+    <h2>Pie de foto</h2>
+    <p class="prose">{{ entry.caption }}</p>
+  </section>
+  {% endif %}
+</article>
+{% endblock %}

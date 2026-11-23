@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">Lista</p>
+  <h1>Todos los reels ingeridos</h1>
+  <p class="lede">Vista simple, sin tablero. El banco se queda solo con los outliers.</p>
+</section>
+{% if rows %}
+<ul class="reel-list">
+  {% for row in rows %}
+  <li>
+    <div>
+      <strong>@{{ row.account }}</strong>
+      <time>{{ row.published_at|es_date }}</time>
+    </div>
+    <p>{{ row.video_play_count|es_int }} reproducciones · {{ row.multiple|multiple }}</p>
+    <p class="chips">
+      {% if row.is_outlier %}<span class="chip">outlier</span>{% else %}<span class="chip quiet">dentro de la mediana</span>{% endif %}
+      {% if row.is_example %}<span class="chip example">ejemplo</span>{% endif %}
+    </p>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<section class="empty">
+  <h2>Todavía no hay reels</h2>
+  <p>Lanza el radar cuando tengas APIFY_TOKEN, o carga los ejemplos con <code>radar seed</code>.</p>
+</section>
+{% endif %}
+{% endblock %}

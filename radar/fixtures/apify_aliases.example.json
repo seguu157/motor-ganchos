@@ -1,0 +1,15 @@
+[
+  {
+    "id": "ejemplo-alias-1",
+    "shortCode": "EJEMPLOALIAS",
+    "caption": "[EJEMPLO] Elemento con alias cortos, no es un reel real.",
+    "url": "https://www.instagram.com/reel/EJEMPLOALIAS/",
+    "likes": 15,
+    "comments": 3,
+    "date": "2026-11-02T12:00:00.000Z",
+    "videoPlayCount": 50,
+    "videoUrl": "https://example.invalid/video/EJEMPLOALIAS.mp4",
+    "audioUrl": "https://example.invalid/audio/EJEMPLOALIAS.mp4",
+    "ownerUsername": "jordigpt"
+  }
+]
