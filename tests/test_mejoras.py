@@ -474,3 +474,151 @@ def test_run_con_navegador_no_llama_a_apify(tmp_path, monkeypatch):
     assert outcome.source == "playwright"
     assert outcome.status == "succeeded"
     assert outcome.reels_saved == 1
+
+
+def _carruseles_de_prueba():
+    bajo = parse_item(
+        {
+            "id": "EXP0",
+            "shortCode": "EXP0",
+            "ownerUsername": "marca",
+            "timestamp": "2026-11-01T00:00:00+00:00",
+            "productType": "carousel_container",
+            "likesCount": 0,
+            "commentsCount": 0,
+            "slides": [{"indice": 1, "texto": "Bajo", "origen": "texto"}],
+        }
+    )
+    alto = parse_item(
+        {
+            "id": "EXP1",
+            "shortCode": "EXP1",
+            "ownerUsername": "marca",
+            "timestamp": "2026-11-02T00:00:00+00:00",
+            "productType": "carousel_container",
+            "likesCount": 10,
+            "commentsCount": 10,
+            "slides": [
+                {"indice": 1, "texto": "", "origen": "vacio", "imagen": "https://cdninstagram.com/a.jpg"},
+                {"indice": 2, "texto": "Cierre leído", "origen": "ocr"},
+            ],
+        }
+    )
+    return bajo, alto
+
+
+def test_la_copia_json_conserva_el_carrusel(tmp_path):
+    from radar.export_json import export_document, import_document
+
+    db = Database(tmp_path / "origen.sqlite")
+    bajo, alto = _carruseles_de_prueba()
+    ingest_reels(db, [bajo, alto], is_example=False, run_id=None)
+    db.update_slides(
+        next(row["id"] for row in db.list_reels() if row["short_code"] == "EXP1"),
+        [
+            {"indice": 1, "texto": "Gancho leído por OCR", "origen": "ocr", "imagen": None},
+            {"indice": 2, "texto": "Cierre leído", "origen": "ocr", "imagen": None},
+        ],
+    )
+    copia = Database(tmp_path / "copia.sqlite")
+    import_document(copia, export_document(db))
+    filas = {row["short_code"]: row for row in copia.list_reels()}
+    assert filas["EXP1"]["media_kind"] == "carrusel"
+    assert filas["EXP1"]["is_outlier"] == 1
+    slides = __import__("json").loads(filas["EXP1"]["slides_json"])
+    assert slides[0]["texto"] == "Gancho leído por OCR"
+    assert filas["EXP0"]["is_outlier"] == 0
+
+
+def test_regenerar_el_guion_tira_las_variantes_viejas(tmp_path):
+    db = Database(tmp_path / "radar.sqlite")
+    base = parse_item(
+        {
+            "id": "G0",
+            "shortCode": "G0",
+            "url": "https://www.instagram.com/reel/G0/",
+            "ownerUsername": "cuenta",
+            "timestamp": "2026-11-01T00:00:00+00:00",
+            "videoPlayCount": 0,
+            "likesCount": 0,
+            "commentsCount": 0,
+        }
+    )
+    reel = parse_item(
+        {
+            "id": "G1",
+            "shortCode": "G1",
+            "url": "https://www.instagram.com/reel/G1/",
+            "ownerUsername": "cuenta",
+            "timestamp": "2026-11-02T00:00:00+00:00",
+            "videoPlayCount": 40,
+            "likesCount": 1,
+            "commentsCount": 1,
+        }
+    )
+    ingest_reels(db, [base, reel], is_example=False, run_id=None)
+    fila = next(row for row in db.list_reels() if row["short_code"] == "G1")
+    db.save_analysis(
+        fila["id"],
+        hook_type="pregunta",
+        blocks=[],
+        template="Gancho: [X]",
+        adapted_script="Guion primero.\nCTA: [X]",
+        warnings=[],
+        provider="test",
+        model="test",
+        raw=None,
+    )
+    proyecto = crear_proyecto(db, "Variantes")
+    aplicar_oferta(db, proyecto.id, Perfil(cta="Primero"))
+    aplicar_referencias(db, proyecto.id, [fila["id"]])
+    aplicar_hook(db, proyecto.id, fila["id"])
+    aplicar_guion(db, proyecto.id)
+    aplicar_variantes(db, proyecto.id)
+    aplicar_guion(db, proyecto.id)
+    otra_vez = aplicar_revision
+    with pytest.raises(FlujoError, match="variantes"):
+        otra_vez(db, proyecto.id, "demasiado pronto", aprobar=True)
+
+
+def test_una_tanda_nueva_no_borra_el_texto_ocr(tmp_path):
+    db = Database(tmp_path / "radar.sqlite")
+    _, alto = _carruseles_de_prueba()
+    account_id = db.ensure_account("marca")
+    reel_id = db.upsert_reel(account_id, alto, is_example=False, run_id=None)
+    enriquecidas = [
+        {"indice": 1, "texto": "Gancho leído por OCR", "origen": "ocr", "imagen": None},
+        {"indice": 2, "texto": "Cierre leído", "origen": "ocr", "imagen": None},
+    ]
+    db.update_slides(reel_id, enriquecidas)
+    db.save_transcript(
+        reel_id,
+        text="Diapositiva 1: Gancho leído por OCR",
+        language="es",
+        hook_text="Gancho leído por OCR",
+        segments=[],
+        model="diapositivas",
+    )
+    vacio = parse_item(
+        {
+            "id": "EXP1",
+            "shortCode": "EXP1",
+            "ownerUsername": "marca",
+            "timestamp": "2026-11-02T00:00:00+00:00",
+            "productType": "carousel_container",
+            "likesCount": 11,
+            "commentsCount": 10,
+            "slides": [
+                {"indice": 1, "texto": "", "origen": "vacio", "imagen": "https://cdninstagram.com/a.jpg"},
+                {"indice": 2, "texto": "", "origen": "vacio", "imagen": "https://cdninstagram.com/b.jpg"},
+            ],
+        }
+    )
+    db.upsert_reel(account_id, vacio, is_example=False, run_id=None)
+    fila = db.get_reel(reel_id)
+    slides = __import__("json").loads(fila["slides_json"])
+    assert [slide["texto"] for slide in slides] == ["Gancho leído por OCR", "Cierre leído"]
+    with db.connect() as conn:
+        transcript = conn.execute("SELECT text FROM transcripts WHERE reel_id = ?", (reel_id,)).fetchone()
+    assert transcript is not None
+    assert "Gancho leído por OCR" in transcript["text"]

@@ -170,6 +170,8 @@ def _reel(row: Any) -> dict[str, Any]:
         "audio_url": row["audio_url"],
         "video_duration": row["video_duration"],
         "is_example": bool(row["is_example"]),
+        "media_kind": row["media_kind"] or "reel",
+        "slides": _slides_de_fila(row),
     }
 
 
@@ -192,6 +194,16 @@ def _import_reel(db: Database, reel: dict[str, Any]) -> None:
             "audioUrl": reel.get("audio_url"),
             "videoDuration": reel.get("video_duration"),
             "ownerUsername": reel["account"],
+            "productType": "carousel_container" if reel.get("media_kind") == "carrusel" else "clips",
+            "slides": reel.get("slides") or [],
         }
     )
     db.upsert_reel(account_id, parsed, is_example=bool(reel.get("is_example")), run_id=None)
+
+
+def _slides_de_fila(row: Any) -> list[Any]:
+    raw = row["slides_json"] if "slides_json" in row.keys() else None
+    if not raw:
+        return []
+    slides = json.loads(raw)
+    return slides if isinstance(slides, list) else []

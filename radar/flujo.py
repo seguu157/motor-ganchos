@@ -95,6 +95,8 @@ def aplicar_oferta(db: Database, proyecto_id: int, perfil: Perfil) -> Proyecto:
     db.update_proyecto(
         proyecto_id,
         perfil_json=json.dumps(perfil.as_dict(), ensure_ascii=False),
+        guion="",
+        variantes_json="[]",
         paso="referencias",
         estado="borrador",
     )
@@ -115,6 +117,8 @@ def aplicar_referencias(db: Database, proyecto_id: int, reel_ids: list[int]) -> 
         proyecto_id,
         referencias_json=json.dumps(vistos),
         hook_reel_id=None,
+        guion="",
+        variantes_json="[]",
         paso="hooks",
         estado="borrador",
     )
@@ -126,7 +130,14 @@ def aplicar_hook(db: Database, proyecto_id: int, reel_id: int) -> Proyecto:
     if reel_id not in proyecto.referencias:
         raise FlujoError("El gancho tiene que ser una de las referencias elegidas.")
     _referencia_valida(db, reel_id)
-    db.update_proyecto(proyecto_id, hook_reel_id=reel_id, paso="guion", estado="borrador")
+    db.update_proyecto(
+        proyecto_id,
+        hook_reel_id=reel_id,
+        guion="",
+        variantes_json="[]",
+        paso="guion",
+        estado="borrador",
+    )
     return _exigir(db, proyecto_id)
 
 
@@ -141,7 +152,13 @@ def aplicar_guion(db: Database, proyecto_id: int) -> Proyecto:
     cta = proyecto.perfil.cta.strip() or "[X]"
     guion = _sin_cierre(base)
     guion = f"{guion}\nCTA: {cta}".strip()
-    db.update_proyecto(proyecto_id, guion=guion, paso="variantes", estado="borrador")
+    db.update_proyecto(
+        proyecto_id,
+        guion=guion,
+        variantes_json="[]",
+        paso="variantes",
+        estado="borrador",
+    )
     return _exigir(db, proyecto_id)
 
 

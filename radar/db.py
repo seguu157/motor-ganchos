@@ -249,8 +249,21 @@ class Database:
             conn.execute("DELETE FROM accounts WHERE username = ?", (username,))
 
     def upsert_reel(self, account_id: int, reel: Any, *, is_example: bool, run_id: int | None) -> int:
+        from radar.carrusel import fusionar_diapositivas
+
         now = utc_now()
         raw = json.dumps(reel.raw, ensure_ascii=False)
+        media_kind = getattr(reel, "media_kind", None) or "reel"
+        entrantes = list(getattr(reel, "slides", ()) or ())
+        with self.connect() as conn:
+            previa = conn.execute(
+                "SELECT slides_json FROM reels WHERE instagram_id = ?",
+                (reel.instagram_id,),
+            ).fetchone()
+        guardadas = json.loads(previa["slides_json"]) if previa and previa["slides_json"] else []
+        if not isinstance(guardadas, list):
+            guardadas = []
+        slides = fusionar_diapositivas(guardadas, entrantes, media_kind=media_kind)
         with self.connect() as conn:
             conn.execute(
                 """
@@ -298,12 +311,15 @@ class Database:
                     1 if is_example else 0,
                     raw,
                     now,
-                    getattr(reel, "media_kind", None) or "reel",
-                    json.dumps(list(getattr(reel, "slides", ()) or ()), ensure_ascii=False),
+                    media_kind,
+                    json.dumps(slides, ensure_ascii=False),
                 ),
             )
             row = conn.execute("SELECT id FROM reels WHERE instagram_id = ?", (reel.instagram_id,)).fetchone()
-        return int(row["id"])
+            reel_id = int(row["id"])
+            if _firma_diapositivas(guardadas) != _firma_diapositivas(slides):
+                conn.execute("DELETE FROM transcripts WHERE reel_id = ?", (reel_id,))
+        return reel_id
 
     def list_reels(self) -> list[sqlite3.Row]:
         with self.connect() as conn:
@@ -720,6 +736,15 @@ class Database:
             comment_weight=row["comment_weight"],
             categoria=categoria_de(row["hook_type"], media_kind),
         )
+
+
+def _firma_diapositivas(slides: list[dict[str, Any]]) -> str:
+    partes = []
+    for posicion, slide in enumerate(slides, start=1):
+        if not isinstance(slide, dict):
+            continue
+        partes.append(f"{slide.get('indice') or posicion}:{str(slide.get('texto') or '').strip()}")
+    return "\n".join(partes)
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, name: str, ddl: str) -> None:

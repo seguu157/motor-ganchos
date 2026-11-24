@@ -118,6 +118,63 @@ def completar_diapositivas(
     return hechas, conservadas
 
 
+def fusionar_diapositivas(
+    guardadas: list[dict[str, Any]],
+    nuevas: list[dict[str, Any]],
+    *,
+    media_kind: str,
+) -> list[dict[str, Any]]:
+    """Conserva el texto ya leído si la fuente nueva llega vacía.
+
+    Una tanda posterior no debe borrar el OCR. Si el origen trae texto, ese
+    texto manda. Si la pieza ya no es un carrusel, no quedan diapositivas.
+    """
+    if media_kind != "carrusel":
+        return []
+    if not nuevas:
+        return [dict(slide) for slide in guardadas if isinstance(slide, dict)]
+    previas: dict[int, dict[str, Any]] = {}
+    for posicion, slide in enumerate(guardadas, start=1):
+        if isinstance(slide, dict):
+            previas[int(slide.get("indice") or posicion)] = slide
+    fusion: list[dict[str, Any]] = []
+    for posicion, nueva in enumerate(nuevas, start=1):
+        if not isinstance(nueva, dict):
+            continue
+        indice = int(nueva.get("indice") or posicion)
+        previa = previas.get(indice) or {}
+        texto_nuevo = str(nueva.get("texto") or "").strip()
+        texto_previo = str(previa.get("texto") or "").strip()
+        if texto_nuevo:
+            fusion.append(
+                {
+                    "indice": indice,
+                    "texto": texto_nuevo,
+                    "origen": nueva.get("origen") or "texto",
+                    "imagen": nueva.get("imagen"),
+                }
+            )
+        elif texto_previo:
+            fusion.append(
+                {
+                    "indice": indice,
+                    "texto": texto_previo,
+                    "origen": previa.get("origen") or "ocr",
+                    "imagen": None,
+                }
+            )
+        else:
+            fusion.append(
+                {
+                    "indice": indice,
+                    "texto": "",
+                    "origen": nueva.get("origen") or "vacio",
+                    "imagen": nueva.get("imagen"),
+                }
+            )
+    return fusion
+
+
 def texto_unido(slides: list[dict[str, Any]]) -> str:
     partes = []
     for slide in slides:
