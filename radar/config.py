@@ -44,6 +44,12 @@ class Settings:
     ig_username: str | None
     ig_session_file: Path
     ig_max_accounts: int
+    browser_profile: Path
+    browser_max_accounts: int
+    browser_max_posts: int
+    browser_pause_account: tuple[float, float]
+    browser_pause_post: tuple[float, float]
+    comment_weight: float
     codex_model: str | None
     codex_bin: str
     codex_timeout: float
@@ -68,6 +74,10 @@ class Settings:
     @property
     def ig_ready(self) -> bool:
         return bool(self.ig_username) and self.ig_session_file.is_file()
+
+    @property
+    def browser_ready(self) -> bool:
+        return (self.browser_profile / "perfil.listo").is_file()
 
 
 def load_settings() -> Settings:
@@ -98,6 +108,12 @@ def load_settings() -> Settings:
         ig_username=_blank(os.environ.get("IG_USERNAME")),
         ig_session_file=Path(os.environ.get("IG_SESSION_FILE", "data/ig.session")),
         ig_max_accounts=_int("RADAR_IG_MAX_ACCOUNTS", 10, minimum=1),
+        browser_profile=Path(os.environ.get("IG_BROWSER_PROFILE", "data/ig-browser")),
+        browser_max_accounts=_int("RADAR_BROWSER_MAX_ACCOUNTS", 5, minimum=1),
+        browser_max_posts=_int("RADAR_BROWSER_MAX_POSTS", 20, minimum=1),
+        browser_pause_account=_span("RADAR_BROWSER_PAUSE_ACCOUNT", (25.0, 70.0)),
+        browser_pause_post=_span("RADAR_BROWSER_PAUSE_POST", (3.0, 8.0)),
+        comment_weight=_float("RADAR_COMMENT_WEIGHT", 4.0),
         codex_model=_blank(os.environ.get("RADAR_CODEX_MODEL")),
         codex_bin=os.environ.get("RADAR_CODEX_BIN", "codex"),
         codex_timeout=_float("RADAR_CODEX_TIMEOUT", 180),
@@ -106,9 +122,9 @@ def load_settings() -> Settings:
 
 
 def _source_mode() -> str:
-    mode = (os.environ.get("RADAR_SOURCE") or "auto").strip().lower()
-    if mode not in {"auto", "apify", "instaloader"}:
-        raise ValueError("RADAR_SOURCE tiene que ser auto, apify o instaloader.")
+    mode = (os.environ.get("RADAR_SOURCE") or "playwright").strip().lower()
+    if mode not in {"playwright", "apify", "instaloader", "auto"}:
+        raise ValueError("RADAR_SOURCE tiene que ser playwright, apify, instaloader o auto.")
     return mode
 
 
@@ -144,6 +160,23 @@ def _int(name: str, default: int, *, minimum: int) -> int:
     if number < minimum:
         raise ValueError(f"{name} tiene que ser >= {minimum}.")
     return number
+
+
+def _span(name: str, default: tuple[float, float]) -> tuple[float, float]:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    pieces = raw.strip().split("-")
+    if len(pieces) != 2:
+        raise ValueError(f"{name} tiene que ser mínimo-máximo, por ejemplo 25-70.")
+    try:
+        low = float(pieces[0].strip().replace(",", "."))
+        high = float(pieces[1].strip().replace(",", "."))
+    except ValueError as exc:
+        raise ValueError(f"{name} tiene que ser mínimo-máximo.") from exc
+    if low < 0 or high < low:
+        raise ValueError(f"{name} tiene que ir de menor a mayor y no puede ser negativo.")
+    return (low, high)
 
 
 def _float(name: str, default: float) -> float:

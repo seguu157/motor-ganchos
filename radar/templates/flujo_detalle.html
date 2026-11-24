@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="back"><a href="/flujo">← Flujo</a></p>
+<section class="page-head">
+  <p class="eyebrow">{{ proyecto.estado }}</p>
+  <h1>{{ proyecto.titulo }}</h1>
+</section>
+
+{% if error %}
+<p class="warn" role="alert">{{ error }}</p>
+{% endif %}
+
+<ol class="stepper">
+  {% for paso in pasos %}
+  <li {% if proyecto.paso == paso %}aria-current="step"{% endif %}>{{ etiquetas[paso] }}</li>
+  {% endfor %}
+</ol>
+
+<section class="sheet">
+  <h2>Oferta</h2>
+  <form class="launch" method="post" action="/flujo/{{ proyecto.id }}/oferta">
+    {% for campo in campos %}
+    <label>{{ etiquetas_perfil[campo] }}
+      <input name="{{ campo }}" value="{{ proyecto.perfil.hueco(campo) if proyecto.perfil.hueco(campo) != '[X]' else '' }}">
+    </label>
+    {% endfor %}
+    <button type="submit">Guardar oferta</button>
+  </form>
+</section>
+
+<section class="sheet">
+  <h2>Referencias</h2>
+  <p class="fine">Solo outliers que no sean de ejemplo. Si la lista está vacía, todavía no hay métricas reales en el banco.</p>
+  <form class="launch" method="post" action="/flujo/{{ proyecto.id }}/referencias">
+    {% if banco %}
+    <ul class="steps">
+      {% for entry in banco %}
+      <li>
+        <label class="check">
+          <input type="checkbox" name="reel" value="{{ entry.reel_id }}" {% if entry.reel_id in proyecto.referencias %}checked{% endif %}>
+          @{{ entry.account }} · {{ entry.multiple|multiple }} · {{ entry.hook or "sin gancho" }}
+        </label>
+      </li>
+      {% endfor %}
+    </ul>
+    <button type="submit">Guardar referencias</button>
+    {% else %}
+    <p class="muted">No hay outliers con métricas reales. Los ejemplos no se pueden elegir.</p>
+    {% endif %}
+  </form>
+</section>
+
+<section class="sheet">
+  <h2>Hooks</h2>
+  {% if referencias %}
+  <form class="launch" method="post" action="/flujo/{{ proyecto.id }}/hook">
+    {% for entry in referencias %}
+    <label class="check">
+      <input type="radio" name="reel" value="{{ entry.reel_id }}" {% if proyecto.hook_reel_id == entry.reel_id %}checked{% endif %} required>
+      @{{ entry.account }} · {{ entry.hook or entry.template or "sin texto" }}
+    </label>
+    {% endfor %}
+    <button type="submit">Elegir gancho</button>
+  </form>
+  {% else %}
+  <p class="muted">Primero elige referencias.</p>
+  {% endif %}
+</section>
+
+<section class="sheet">
+  <h2>Guion</h2>
+  {% if proyecto.guion %}
+  <pre class="prose script">{{ proyecto.guion|gaps }}</pre>
+  {% endif %}
+  <form method="post" action="/flujo/{{ proyecto.id }}/guion">
+    <button type="submit">Generar guion desde la plantilla</button>
+  </form>
+</section>
+
+<section class="sheet">
+  <h2>Variantes</h2>
+  {% if proyecto.variantes %}
+  <ol class="steps">
+    {% for variante in proyecto.variantes %}
+    <li>
+      <span>Variante {{ variante.id }}</span>
+      <pre class="prose">{{ variante.texto|gaps }}</pre>
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+  <form method="post" action="/flujo/{{ proyecto.id }}/variantes">
+    <button type="submit">Generar variantes del mismo formato</button>
+  </form>
+</section>
+
+<section class="sheet">
+  <h2>Revisión</h2>
+  <form class="launch" method="post" action="/flujo/{{ proyecto.id }}/revision">
+    <label>Notas
+      <input name="notas" value="{{ proyecto.notas }}">
+    </label>
+    <label class="check">
+      <input type="checkbox" name="aprobar" value="1" {% if proyecto.estado == "aprobado" or proyecto.estado == "exportado" %}checked{% endif %}>
+      Lo apruebo para exportar.
+    </label>
+    <button type="submit">Guardar revisión</button>
+  </form>
+</section>
+
+<section class="sheet">
+  <h2>Exportación</h2>
+  <p><a href="/flujo/{{ proyecto.id }}/exportar">Descargar Markdown</a></p>
+</section>
+{% endblock %}

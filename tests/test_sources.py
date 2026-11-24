@@ -77,13 +77,13 @@ class FuenteFalsa:
 
 
 def test_auto_elige_apify_solo_si_hay_token_y_cabe(tmp_path, monkeypatch):
-    settings = make_settings(monkeypatch, tmp_path, APIFY_TOKEN="token-de-prueba")
+    settings = make_settings(monkeypatch, tmp_path, APIFY_TOKEN="token-de-prueba", RADAR_SOURCE="auto")
     cuentas = ["jordigpt", "dani_llamazares"]
     cabe = plan_source(settings, cuentas, 20)
     assert cabe.effective == "apify"
     assert cabe.estimate.estimated_usd == Decimal("0.10")
 
-    sin_token = make_settings(monkeypatch, tmp_path, APIFY_TOKEN=None)
+    sin_token = make_settings(monkeypatch, tmp_path, APIFY_TOKEN=None, RADAR_SOURCE="auto")
     respaldo = plan_source(sin_token, cuentas, 20)
     assert respaldo.effective == "instaloader"
     assert respaldo.estimate.estimated_usd == Decimal("0.00")
@@ -202,7 +202,7 @@ def test_pausas_y_parada_sin_reintentos(tmp_path):
 
 
 def test_fallback_de_cuota_sin_reintentar_apify(tmp_path, monkeypatch):
-    settings = make_settings(monkeypatch, tmp_path, APIFY_TOKEN="token-de-prueba")
+    settings = make_settings(monkeypatch, tmp_path, APIFY_TOKEN="token-de-prueba", RADAR_SOURCE="auto")
     db = Database(settings.db_path)
     db.upsert_account("jordigpt", active=True)
     apify = FuenteFalsa(error=ApifyQuotaError("Apify respondió 402."))
@@ -239,7 +239,7 @@ def test_fallback_de_cuota_sin_reintentar_apify(tmp_path, monkeypatch):
 
 
 def test_sin_token_no_construye_apify_y_el_presupuesto_sigue_parando_apify(tmp_path, monkeypatch):
-    sin_token = make_settings(monkeypatch, tmp_path)
+    sin_token = make_settings(monkeypatch, tmp_path, RADAR_SOURCE="auto")
     db = Database(sin_token.db_path)
     db.upsert_account("jordigpt", active=True)
 

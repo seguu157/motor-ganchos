@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">Marca</p>
+  <h1>Perfil de Antonio</h1>
+  <p class="lede">La ficha y el flujo usan estos campos. Lo que dejes vacío se ve como [X] y el modelo no debe rellenarlo.</p>
+</section>
+
+<form class="launch" method="post" action="/perfil">
+  {% for campo in campos %}
+  <label>{{ etiquetas[campo] }}
+    <input name="{{ campo }}" value="{{ perfil.hueco(campo) if perfil.hueco(campo) != '[X]' else '' }}">
+  </label>
+  {% endfor %}
+  <button type="submit">Guardar perfil</button>
+</form>
+{% endblock %}

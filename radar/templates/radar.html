@@ -8,7 +8,7 @@
 <section class="page-head">
   <p class="eyebrow">Antes de gastar crédito</p>
   <h1>Estimación de la tanda</h1>
-  <p class="lede">Apify es la fuente principal. Instaloader es el respaldo gratuito: entra solo si no hay token, si el coste no cabe o si lo eliges. Esto es una estimación, no un cargo ni el saldo de tu cuenta.</p>
+  <p class="lede">La fuente por defecto es el navegador, con la sesión de una cuenta secundaria. Apify e Instaloader siguen disponibles. Esto es una estimación, no un cargo ni el saldo de tu cuenta.</p>
 </section>
 
 {% if error %}
@@ -22,9 +22,10 @@
 <form class="receipt" method="get" action="/radar">
   <label>Fuente
     <select name="source">
-      <option value="auto" {% if source_requested == "auto" %}selected{% endif %}>Automática</option>
+      <option value="playwright" {% if source_requested == "playwright" %}selected{% endif %}>Navegador</option>
       <option value="apify" {% if source_requested == "apify" %}selected{% endif %}>Apify</option>
       <option value="instaloader" {% if source_requested == "instaloader" %}selected{% endif %}>Instaloader</option>
+      <option value="auto" {% if source_requested == "auto" %}selected{% endif %}>Automática</option>
     </select>
   </label>
   <label>Reels por cuenta
@@ -48,7 +49,9 @@
     <div><dt>Reels que caben en el crédito</dt><dd>{{ estimate.reels_fitting_in_credit|es_int }}</dd></div>
   </dl>
   <p class="fine">{{ plan.reason }} Tarifa publicada del plan Free del actor: 2,60 USD por cada 1.000 reels y 5 USD de crédito al mes. Instaloader sale a 0,00 USD. Si Apify cambia el precio, ajústalo con APIFY_USD_PER_1000.</p>
-  {% if plan.effective == "instaloader" %}
+  {% if plan.effective == "playwright" %}
+  <p class="fine">El navegador usa una cuenta secundaria y pausas al azar. Si Instagram responde 401, 429, checkpoint o challenge, la tanda se para. El scraping con sesión va contra las condiciones de Instagram y puede bloquear esa cuenta. Máximo {{ plan.max_accounts }} perfiles por tanda.</p>
+  {% elif plan.effective == "instaloader" %}
   <p class="fine">Instaloader usa una cuenta secundaria y puede acabar limitada. Si Instagram bloquea, lánzalo desde una IP residencial, no desde el VPS. Máximo {{ plan.max_accounts }} cuentas por tanda.</p>
   {% endif %}
   <ul class="who">
@@ -73,7 +76,7 @@
   {% endif %}
   <button type="submit" {% if not puede_lanzar %}disabled{% endif %}>Lanzar ingesta</button>
   {% if not puede_lanzar %}
-  <p class="fine">{% if not token_listo %}Falta APIFY_TOKEN. El botón no llama a Apify.{% else %}Esta fuente no se puede lanzar todavía.{% endif %}</p>
+  <p class="fine">{{ bloqueo or "Esta fuente no se puede lanzar todavía." }}</p>
   {% endif %}
 </form>
 {% endif %}

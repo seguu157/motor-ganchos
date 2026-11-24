@@ -1,4 +1,4 @@
-"""Fuentes de reels. Apify es la principal. Instaloader es el respaldo."""
+"""Fuentes de reels. El navegador es la fuente por defecto. Apify e Instaloader son alternativas."""
 
 from radar.sources.apify import ApifySource
 from radar.sources.instaloader_source import InstaloaderSource

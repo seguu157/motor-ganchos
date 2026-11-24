@@ -27,6 +27,7 @@ def render_markdown(entries: Iterable[BankEntry]) -> str:
         "# Banco de ganchos",
         "",
         "Cada entrada es un reel con reproducciones de al menos 2× la mediana de su cuenta (últimos 20 reels con cifra).",
+        "Un carrusel no tiene reproducciones: entra si me gusta + 4 × comentarios llega a 2× la mediana de los últimos carruseles de la cuenta.",
         "El múltiplo usa coma decimal, por ejemplo 10,5x.",
         "Las filas marcadas como ejemplo no son métricas ni textos reales: son fixtures de demostración.",
         "",
@@ -107,13 +108,19 @@ def parse_markdown(text: str) -> list[dict[str, str]]:
 
 def _bullets(entry: BankEntry, label: str) -> list[str]:
     median = format_int_es(entry.median_plays) if entry.median_plays is not None else "—"
+    if entry.media_kind == "carrusel":
+        metrica = f"- **Interacción:** {format_int_es(entry.engagement_score)}"
+        mediana = f"- **Mediana de interacción:** {median}"
+    else:
+        metrica = f"- **Reproducciones:** {format_int_es(entry.play_count)}"
+        mediana = f"- **Mediana de la cuenta:** {median}"
     return [
         f"- **Creador:** {entry.account}",
         f"- **URL:** {entry.url}",
         f"- **Fecha:** {date_key(entry.published_at) or '—'}",
         f"- **Múltiplo:** {label}",
-        f"- **Reproducciones:** {format_int_es(entry.play_count)}",
-        f"- **Mediana de la cuenta:** {median}",
+        metrica,
+        mediana,
         f"- **Me gusta:** {format_int_es(entry.likes_count)}",
         f"- **Comentarios:** {format_int_es(entry.comments_count)}",
         f"- **Tipo de gancho:** {entry.hook_type or '—'}",

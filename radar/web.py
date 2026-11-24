@@ -11,11 +11,29 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup, escape
 
+from radar.categorias import CATEGORIAS
 from radar.config import Settings, load_settings
 from radar.db import BankEntry, Database
+from radar.dossier import construir_dossier
 from radar.export_json import dumps_document, export_document, filter_entries
 from radar.export_md import render_markdown
+from radar.flujo import (
+    ETIQUETAS,
+    PASOS,
+    FlujoError,
+    aplicar_guion,
+    aplicar_hook,
+    aplicar_oferta,
+    aplicar_referencias,
+    aplicar_revision,
+    aplicar_variantes,
+    cargar_proyecto,
+    crear_proyecto,
+    exportar_proyecto,
+    listar_proyectos,
+)
 from radar.format_es import format_date, format_int_es, format_multiple, format_usd
+from radar.perfil import CAMPOS, ETIQUETAS as PERFIL_ETIQUETAS, perfil_desde_formulario
 from radar.pipeline import NoActiveAccounts, execute_selected_run
 from radar.sources.select import block_reason, plan_source
 from radar.seed import seed_if_needed
@@ -65,6 +83,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "date_from": (params.get("desde") or "").strip() or None,
             "date_to": (params.get("hasta") or "").strip() or None,
             "hide_examples": params.get("ocultar_ejemplos") == "1",
+            "category": (params.get("categoria") or "").strip() or None,
+            "media_kind": (params.get("formato") or "").strip() or None,
+            "query": (params.get("q") or "").strip() or None,
         }
 
     def selected_bank(params) -> list[BankEntry]:
@@ -84,14 +105,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         all_entries = db.list_bank()
         types = sorted({entry.hook_type for entry in all_entries if entry.hook_type})
         accounts = sorted({entry.account for entry in all_entries})
+        categorias = [nombre for nombre in CATEGORIAS if any(entry.categoria == nombre for entry in all_entries)]
         return render(
             "banco.html",
             nav="banco",
-            title="Banco de ganchos",
+            title="Biblioteca de ganchos",
             entries=entries,
             total=len(all_entries),
             types=types,
             accounts=accounts,
+            categorias=categorias,
             filtros=request.query_params,
             hay_ejemplos=any(entry.is_example for entry in all_entries),
             color=_color,
@@ -109,7 +132,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 text="Solo entran los que llegan al menos a 2× la mediana de su cuenta.",
                 status_code=404,
             )
-        return render("ficha.html", nav="banco", title=entry.hook or entry.account, entry=entry, color=_color)
+        perfil = db.get_perfil()
+        return render(
+            "ficha.html",
+            nav="banco",
+            title=entry.hook or entry.account,
+            entry=entry,
+            dossier=construir_dossier(entry, perfil),
+            perfil=perfil,
+            color=_color,
+        )
 
     @app.get("/reels", response_class=HTMLResponse)
     def reels() -> HTMLResponse:
@@ -248,6 +280,159 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         threading.Thread(target=worker, name="radar-run", daemon=True).start()
         return RedirectResponse("/radar?aviso=Ingesta+lanzada.+Esta+página+se+actualiza+sola+mientras+dure.", status_code=303)
 
+    @app.get("/perfil", response_class=HTMLResponse)
+    def perfil(aviso: str = "") -> HTMLResponse:
+        return render(
+            "perfil.html",
+            nav="perfil",
+            title="Perfil",
+            perfil=db.get_perfil(),
+            campos=CAMPOS,
+            etiquetas=PERFIL_ETIQUETAS,
+            aviso=aviso,
+        )
+
+    @app.post("/perfil")
+    async def guardar_perfil(request: Request) -> RedirectResponse:
+        form = await request.form()
+        db.save_perfil(perfil_desde_formulario(form))
+        return RedirectResponse("/perfil?aviso=Perfil+guardado.", status_code=303)
+
+    @app.get("/flujo", response_class=HTMLResponse)
+    def flujo(aviso: str = "", error: str = "") -> HTMLResponse:
+        return render(
+            "flujo.html",
+            nav="flujo",
+            title="Flujo",
+            proyectos=listar_proyectos(db),
+            etiquetas=ETIQUETAS,
+            aviso=aviso,
+            error=error,
+        )
+
+    @app.post("/flujo")
+    async def crear_flujo(request: Request) -> Response:
+        form = await request.form()
+        try:
+            proyecto = crear_proyecto(db, str(form.get("titulo") or ""))
+        except FlujoError as exc:
+            return render(
+                "flujo.html",
+                nav="flujo",
+                title="Flujo",
+                proyectos=listar_proyectos(db),
+                etiquetas=ETIQUETAS,
+                error=str(exc),
+                status_code=400,
+            )
+        return RedirectResponse(f"/flujo/{proyecto.id}", status_code=303)
+
+    @app.get("/flujo/{proyecto_id}", response_class=HTMLResponse)
+    def flujo_detalle(proyecto_id: int, aviso: str = "", error: str = "") -> HTMLResponse:
+        proyecto = cargar_proyecto(db, proyecto_id)
+        if proyecto is None:
+            return render(
+                "vacio.html",
+                title="Sin proyecto",
+                heading="Ese proyecto no existe",
+                text="Créalo desde el flujo.",
+                status_code=404,
+            )
+        referencias = []
+        for reel_id in proyecto.referencias:
+            entry = db.get_bank_entry(reel_id)
+            if entry is not None:
+                referencias.append(entry)
+        return render(
+            "flujo_detalle.html",
+            nav="flujo",
+            title=proyecto.titulo,
+            proyecto=proyecto,
+            pasos=PASOS,
+            etiquetas=ETIQUETAS,
+            campos=CAMPOS,
+            etiquetas_perfil=PERFIL_ETIQUETAS,
+            banco=[entry for entry in db.list_bank() if not entry.is_example],
+            referencias=referencias,
+            aviso=aviso,
+            error=error,
+        )
+
+    def _flujo_error(proyecto_id: int, exc: FlujoError) -> HTMLResponse:
+        response = flujo_detalle(proyecto_id, error=str(exc))
+        response.status_code = 400
+        return response
+
+    @app.post("/flujo/{proyecto_id}/oferta")
+    async def flujo_oferta(proyecto_id: int, request: Request) -> Response:
+        form = await request.form()
+        try:
+            aplicar_oferta(db, proyecto_id, perfil_desde_formulario(form))
+        except FlujoError as exc:
+            return _flujo_error(proyecto_id, exc)
+        return RedirectResponse(f"/flujo/{proyecto_id}?aviso=Oferta+guardada.", status_code=303)
+
+    @app.post("/flujo/{proyecto_id}/referencias")
+    async def flujo_referencias(proyecto_id: int, request: Request) -> Response:
+        form = await request.form()
+        try:
+            ids = [int(value) for value in form.getlist("reel")]
+            aplicar_referencias(db, proyecto_id, ids)
+        except (FlujoError, ValueError) as exc:
+            return _flujo_error(proyecto_id, FlujoError(str(exc)))
+        return RedirectResponse(f"/flujo/{proyecto_id}?aviso=Referencias+guardadas.", status_code=303)
+
+    @app.post("/flujo/{proyecto_id}/hook")
+    async def flujo_hook(proyecto_id: int, request: Request) -> Response:
+        form = await request.form()
+        try:
+            aplicar_hook(db, proyecto_id, int(str(form.get("reel") or "")))
+        except (FlujoError, ValueError) as exc:
+            return _flujo_error(proyecto_id, FlujoError(str(exc)))
+        return RedirectResponse(f"/flujo/{proyecto_id}?aviso=Gancho+elegido.", status_code=303)
+
+    @app.post("/flujo/{proyecto_id}/guion")
+    def flujo_guion(proyecto_id: int) -> Response:
+        try:
+            aplicar_guion(db, proyecto_id)
+        except FlujoError as exc:
+            return _flujo_error(proyecto_id, exc)
+        return RedirectResponse(f"/flujo/{proyecto_id}?aviso=Guion+generado.", status_code=303)
+
+    @app.post("/flujo/{proyecto_id}/variantes")
+    def flujo_variantes(proyecto_id: int) -> Response:
+        try:
+            aplicar_variantes(db, proyecto_id)
+        except FlujoError as exc:
+            return _flujo_error(proyecto_id, exc)
+        return RedirectResponse(f"/flujo/{proyecto_id}?aviso=Variantes+generadas.", status_code=303)
+
+    @app.post("/flujo/{proyecto_id}/revision")
+    async def flujo_revision(proyecto_id: int, request: Request) -> Response:
+        form = await request.form()
+        try:
+            aplicar_revision(
+                db,
+                proyecto_id,
+                str(form.get("notas") or ""),
+                aprobar=form.get("aprobar") == "1",
+            )
+        except FlujoError as exc:
+            return _flujo_error(proyecto_id, exc)
+        return RedirectResponse(f"/flujo/{proyecto_id}?aviso=Revisión+guardada.", status_code=303)
+
+    @app.get("/flujo/{proyecto_id}/exportar")
+    def flujo_exportar(proyecto_id: int) -> Response:
+        try:
+            texto = exportar_proyecto(db, proyecto_id)
+        except FlujoError as exc:
+            return _flujo_error(proyecto_id, exc)
+        return PlainTextResponse(
+            texto,
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename=proyecto-{proyecto_id}.md"},
+        )
+
     @app.get("/ajustes", response_class=HTMLResponse)
     def ajustes() -> HTMLResponse:
         tube = TubeAlfredAdapter(settings.tubealfred_api_key)
@@ -260,6 +445,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             llm_listo=settings.llm_ready,
             tube=tube,
             ig_listo=settings.ig_ready,
+            navegador_listo=settings.browser_ready,
         )
 
     @app.get("/export/banco.md")
@@ -313,7 +499,14 @@ def _radar_page(
     else:
         plan_error = "No hay cuentas activas en la watchlist."
     puede_lanzar = plan is not None and block_reason(settings, plan, allow_over_budget=True) is None
-    shown_source = source_requested if source_requested in {"auto", "apify", "instaloader"} else "auto"
+    shown_source = (
+        source_requested
+        if source_requested in {"playwright", "apify", "instaloader", "auto"}
+        else "playwright"
+    )
+    bloqueo = ""
+    if plan is not None:
+        bloqueo = block_reason(settings, plan, allow_over_budget=True) or ""
     running = db.running_run()
     return render(
         "radar.html",
@@ -327,6 +520,7 @@ def _radar_page(
         error=error or plan_error,
         aviso=aviso,
         token_listo=bool(settings.apify_token),
+        bloqueo=bloqueo,
         puede_lanzar=puede_lanzar,
         running=running,
         runs=db.list_runs(),

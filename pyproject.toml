@@ -16,6 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 whisper = ["faster-whisper>=1.1.0"]
+browser = ["playwright>=1.49"]
+ocr = ["rapidocr-onnxruntime>=1.4"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

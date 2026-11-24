@@ -14,6 +14,9 @@ from dataclasses import dataclass
 
 DEFAULT_SAMPLE_SIZE = 20
 DEFAULT_THRESHOLD = 2.0
+# Un comentario pesa más que un me gusta. Es una regla de esta app, no una
+# métrica que publique Instagram.
+DEFAULT_COMMENT_WEIGHT = 4.0
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,25 @@ class OutlierScore:
     multiple: float | None
     is_outlier: bool
     sample_size: int
+
+
+def engagement_score(
+    likes: int | None,
+    comments: int | None,
+    *,
+    weight: float = DEFAULT_COMMENT_WEIGHT,
+) -> int | None:
+    """Interacción de un carrusel. Si falta me gusta o comentarios, no hay cifra.
+
+    No se sustituye el hueco por cero: eso fabricaría una mediana.
+    """
+    if likes is None or comments is None:
+        return None
+    if likes < 0 or comments < 0:
+        return None
+    if weight < 0:
+        raise ValueError("El peso de los comentarios no puede ser negativo.")
+    return int(round(likes + (weight * comments)))
 
 
 def median_plays(values: list[int]) -> float | None:

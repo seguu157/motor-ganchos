@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="page-head">
-  <p class="eyebrow">Banco de ganchos</p>
+  <p class="eyebrow">Biblioteca</p>
   <h1>Reels que pasan de 2× la mediana</h1>
-  <p class="lede">De cada cuenta se miran los últimos 20 reels con reproducciones. Aquí solo entran los que al menos duplican esa mediana, con el gancho, la plantilla y un guion para Antonio.</p>
+  <p class="lede">De cada cuenta se miran los últimos 20 reels con reproducciones, o los últimos carruseles por interacción. Aquí solo entran los que al menos duplican esa mediana.</p>
 </section>
 
 {% if hay_ejemplos %}
@@ -11,12 +11,30 @@
 {% endif %}
 
 <form class="filters" method="get" action="/banco">
+  <label>Buscar
+    <input type="search" name="q" value="{{ filtros.get('q', '') }}" placeholder="Gancho, pie o cuenta">
+  </label>
   <label>Cuenta
     <select name="cuenta">
       <option value="">Todas</option>
       {% for account in accounts %}
       <option value="{{ account }}" {% if filtros.get("cuenta") == account %}selected{% endif %}>@{{ account }}</option>
       {% endfor %}
+    </select>
+  </label>
+  <label>Categoría
+    <select name="categoria">
+      <option value="">Todas</option>
+      {% for categoria in categorias %}
+      <option value="{{ categoria }}" {% if filtros.get("categoria") == categoria %}selected{% endif %}>{{ categoria }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Formato
+    <select name="formato">
+      <option value="">Todos</option>
+      <option value="reel" {% if filtros.get("formato") == "reel" %}selected{% endif %}>Reel</option>
+      <option value="carrusel" {% if filtros.get("formato") == "carrusel" %}selected{% endif %}>Carrusel</option>
     </select>
   </label>
   <label>Tipo de gancho
@@ -67,7 +85,9 @@
     <p class="multiple {{ entry.multiple|heat }}">{{ entry.multiple|multiple }}</p>
     <p class="hook">{{ entry.hook or "Pendiente de transcribir" }}</p>
     <div class="chips">
-      {% if entry.hook_type %}<span class="chip">{{ entry.hook_type }}</span>{% endif %}
+      {% if entry.categoria %}<span class="chip">{{ entry.categoria }}</span>{% endif %}
+      <span class="chip quiet">{{ "carrusel" if entry.media_kind == "carrusel" else "reel" }}</span>
+      {% if entry.hook_type %}<span class="chip quiet">{{ entry.hook_type }}</span>{% endif %}
       {% if entry.is_example %}<span class="chip example">ejemplo</span>{% endif %}
     </div>
     <div class="card-actions">
