@@ -128,8 +128,14 @@ class CodexClient:
             result = self._runner([self.binary, "login", "status"], input_text=None)
         except FileNotFoundError as exc:
             raise _not_installed() from exc
-        if _returncode(result) != 0 or _looks_logged_out(_combined(result)):
-            detail = _combined(result).strip()
+        texto = _combined(result)
+        if _looks_like_rate_limit(texto):
+            raise CodexRateLimit(
+                "Límite de uso del plan ChatGPT. "
+                "Los reels que faltan quedan pendientes para la próxima tanda."
+            )
+        if _returncode(result) != 0 or _looks_logged_out(texto):
+            detail = texto.strip()
             extra = f" Detalle: {detail}" if detail else ""
             raise CodexNotLoggedIn(f"Codex no tiene sesión de ChatGPT. {LOGIN_HINT}{extra}")
         self._login_checked = True
@@ -212,6 +218,10 @@ def check_backend(settings: Any, *, client: Any = None) -> str:
     return f"Backend {settings.llm_provider} respondió. Tipo de prueba: {draft.hook_type}."
 
 
+def _es_windows() -> bool:
+    return os.name == "nt"
+
+
 def resolver_binario(nombre: str) -> str:
     """Ruta del ejecutable. En Windows, npm lo publica como `codex.CMD`.
 
@@ -223,22 +233,58 @@ def resolver_binario(nombre: str) -> str:
     return encontrado or nombre
 
 
+def citar_argumento_cmd(arg: str) -> str:
+    """Comillas de un argumento para que cmd.exe lo reenvíe entero.
+
+    Dentro de las comillas, `%` sigue expandiéndose: se duplica. Una comilla
+    interna se escribe `\\"`, que es lo que entiende el parser del proceso
+    hijo. Si el argumento acaba en `\\`, se duplica para que no se coma la
+    comilla de cierre.
+    """
+    if arg == "":
+        return '""'
+    especial = any(caracter.isspace() or caracter in '&|<>^()%!"' for caracter in arg)
+    if not especial and not arg.endswith("\\"):
+        return arg
+    cuerpo = arg.replace("%", "%%").replace('"', '\\"')
+    if cuerpo.endswith("\\"):
+        cuerpo += "\\"
+    return f'"{cuerpo}"'
+
+
 def argv_ejecutable(args: list[str]) -> list[str]:
     """Prepara el argv. Un `.cmd` o `.bat` se lanza con `cmd.exe /c`.
 
     CreateProcess no ejecuta un archivo de órdenes aunque la ruta sea
     completa: responde que no es una aplicación Win32. `cmd.exe` sí.
-    Un `.exe` o un binario de Unix se deja como está. `RADAR_CODEX_BIN`
-    entra en `args[0]` y se resuelve igual que el nombre `codex`.
+    Los argumentos de codex (`--model`, `-`, rutas) siguen siendo elementos
+    distintos de la lista: no se aplasta la orden en un solo texto. Un `.exe`
+    o un binario de Unix se deja como está. `RADAR_CODEX_BIN` entra en
+    `args[0]` y se resuelve igual que el nombre `codex`.
     """
     if not args:
-        return args
+        return []
     comando = [resolver_binario(args[0]), *args[1:]]
     ejecutable = comando[0]
-    if os.name == "nt" and ejecutable.lower().endswith((".cmd", ".bat")):
+    if _es_windows() and ejecutable.lower().endswith((".cmd", ".bat")):
         comspec = os.environ.get("COMSPEC") or "cmd.exe"
-        return [comspec, "/d", "/s", "/c", subprocess.list2cmdline(comando)]
+        return [comspec, "/d", "/c", *comando]
     return comando
+
+
+def invocacion_subprocess(argv: list[str]) -> list[str] | str:
+    """Lo que recibe `subprocess.run`.
+
+    En Windows, `list2cmdline` volvería a escapar unas comillas que cmd.exe
+    no interpreta igual. Por eso el wrapper se convierte en una línea literal:
+    `cmd /d /s /c` más la orden, con cada argumento ya citado. `/s` quita
+    exactamente el par de comillas exterior y deja las de cada argumento.
+    """
+    if _es_windows() and len(argv) >= 4 and argv[1:3] == ["/d", "/c"]:
+        comspec, comando = argv[0], argv[3:]
+        interior = " ".join(citar_argumento_cmd(parte) for parte in comando)
+        return f'"{comspec}" /d /s /c "{interior}"'
+    return argv
 
 
 def _default_runner(
@@ -250,7 +296,7 @@ def _default_runner(
     # encoding fijo: en Windows text=True usaría cp1252 y Codex rechaza
     # el stdin con «input is not valid UTF-8». No depende de PYTHONUTF8.
     return subprocess.run(
-        argv_ejecutable(args),
+        invocacion_subprocess(argv_ejecutable(args)),
         input=input_text,
         capture_output=True,
         text=True,
