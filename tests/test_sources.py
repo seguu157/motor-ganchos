@@ -1,4 +1,5 @@
 import inspect
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -323,7 +324,9 @@ def test_login_no_recibe_ni_guarda_la_contrasena(tmp_path):
     assert saved["user"] == "secundaria"
     assert "password" not in saved["init"]
     assert saved["init"]["max_connection_attempts"] == 1
-    assert destination.stat().st_mode & 0o077 == 0
+    # En Windows chmod 600 no quita el permiso de grupo: st_mode queda 0o100666.
+    if os.name != "nt":
+        assert destination.stat().st_mode & 0o077 == 0
     assert "session-blob" not in saved["user"]
 
 

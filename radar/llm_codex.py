@@ -17,6 +17,8 @@ sandbox en solo lectura, y lee el último mensaje. La documentación del CLI
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -210,17 +212,50 @@ def check_backend(settings: Any, *, client: Any = None) -> str:
     return f"Backend {settings.llm_provider} respondió. Tipo de prueba: {draft.hook_type}."
 
 
+def resolver_binario(nombre: str) -> str:
+    """Ruta del ejecutable. En Windows, npm lo publica como `codex.CMD`.
+
+    `subprocess` no aplica PATHEXT: si le pasas `codex` a secas no encuentra
+    el `.cmd`. `shutil.which` sí. Si no está, se devuelve el nombre tal cual
+    para que el fallo sea el de siempre, con el mensaje de instalación.
+    """
+    encontrado = shutil.which(nombre)
+    return encontrado or nombre
+
+
+def argv_ejecutable(args: list[str]) -> list[str]:
+    """Prepara el argv. Un `.cmd` o `.bat` se lanza con `cmd.exe /c`.
+
+    CreateProcess no ejecuta un archivo de órdenes aunque la ruta sea
+    completa: responde que no es una aplicación Win32. `cmd.exe` sí.
+    Un `.exe` o un binario de Unix se deja como está. `RADAR_CODEX_BIN`
+    entra en `args[0]` y se resuelve igual que el nombre `codex`.
+    """
+    if not args:
+        return args
+    comando = [resolver_binario(args[0]), *args[1:]]
+    ejecutable = comando[0]
+    if os.name == "nt" and ejecutable.lower().endswith((".cmd", ".bat")):
+        comspec = os.environ.get("COMSPEC") or "cmd.exe"
+        return [comspec, "/d", "/s", "/c", subprocess.list2cmdline(comando)]
+    return comando
+
+
 def _default_runner(
     args: list[str],
     input_text: str | None = None,
     timeout: float = 180,
     **_kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
+    # encoding fijo: en Windows text=True usaría cp1252 y Codex rechaza
+    # el stdin con «input is not valid UTF-8». No depende de PYTHONUTF8.
     return subprocess.run(
-        args,
+        argv_ejecutable(args),
         input=input_text,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="strict",
         timeout=timeout,
         check=False,
     )
@@ -229,8 +264,10 @@ def _default_runner(
 def _not_installed() -> CodexNotInstalled:
     return CodexNotInstalled(
         "No está el comando `codex`. Instala Node y `@openai/codex` "
-        "(`npm install -g @openai/codex`). Después, `codex login` o, "
-        f"en un VPS, `codex login --device-auth`."
+        "(`npm install -g @openai/codex`) y comprueba que entra en el PATH. "
+        "En Windows el ejecutable es `codex.cmd`; si usas otra ruta, ponla en "
+        "RADAR_CODEX_BIN. Después, `codex login` o, en un VPS, "
+        "`codex login --device-auth`."
     )
 
 
