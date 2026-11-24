@@ -15,6 +15,10 @@ def _entorno_limpio(monkeypatch):
         "TUBEALFRED_API_KEY",
         "APIFY_USD_PER_1000",
         "APIFY_MONTHLY_CREDIT_USD",
+        "RADAR_SOURCE",
+        "IG_USERNAME",
+        "IG_SESSION_FILE",
+        "RADAR_IG_MAX_ACCOUNTS",
     ):
         monkeypatch.delenv(key, raising=False)
 

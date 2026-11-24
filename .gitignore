@@ -8,4 +8,5 @@ __pycache__/
 data/
 *.sqlite
 *.sqlite-journal
+*.session
 .DS_Store

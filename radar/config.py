@@ -40,6 +40,10 @@ class Settings:
     tubealfred_api_key: str | None
     host: str
     port: int
+    radar_source: str
+    ig_username: str | None
+    ig_session_file: Path
+    ig_max_accounts: int
 
     @property
     def llm_api_key(self) -> str | None:
@@ -52,6 +56,10 @@ class Settings:
     @property
     def llm_ready(self) -> bool:
         return self.llm_provider in {"openai", "anthropic"} and bool(self.llm_api_key) and bool(self.llm_model)
+
+    @property
+    def ig_ready(self) -> bool:
+        return bool(self.ig_username) and self.ig_session_file.is_file()
 
 
 def load_settings() -> Settings:
@@ -78,7 +86,18 @@ def load_settings() -> Settings:
         tubealfred_api_key=_blank(os.environ.get("TUBEALFRED_API_KEY")),
         host=os.environ.get("RADAR_HOST", "127.0.0.1"),
         port=_int("RADAR_PORT", 8000, minimum=1),
+        radar_source=_source_mode(),
+        ig_username=_blank(os.environ.get("IG_USERNAME")),
+        ig_session_file=Path(os.environ.get("IG_SESSION_FILE", "data/ig.session")),
+        ig_max_accounts=_int("RADAR_IG_MAX_ACCOUNTS", 10, minimum=1),
     )
+
+
+def _source_mode() -> str:
+    mode = (os.environ.get("RADAR_SOURCE") or "auto").strip().lower()
+    if mode not in {"auto", "apify", "instaloader"}:
+        raise ValueError("RADAR_SOURCE tiene que ser auto, apify o instaloader.")
+    return mode
 
 
 def _provider() -> str:

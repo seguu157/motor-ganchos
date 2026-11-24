@@ -40,10 +40,23 @@
     <dd>{{ settings.db_path }}</dd>
   </div>
   <div>
+    <dt>Fuente</dt>
+    <dd>{{ settings.radar_source }}</dd>
+  </div>
+  <div>
+    <dt>Instaloader</dt>
+    <dd>{% if settings.ig_username %}@{{ settings.ig_username }}{% else %}usuario no definido{% endif %} · sesión {{ "lista" if ig_listo else "no lista" }} · máximo {{ settings.ig_max_accounts }} cuentas</dd>
+  </div>
+  <div>
     <dt>TubeAlfred</dt>
     <dd>desactivado · clave {{ "definida" if tube.key_configured else "no definida" }}</dd>
   </div>
 </dl>
+
+<section class="note">
+  <h2>Instaloader, el respaldo</h2>
+  <p>La contraseña no se guarda. <code>radar ig-login</code> se la pide a Instaloader en la terminal y solo deja el fichero de sesión (<code>{{ settings.ig_session_file }}</code>). Usa una cuenta secundaria: Instagram puede limitarla. Si el VPS sale bloqueado, lanza la tanda desde una IP residencial.</p>
+</section>
 
 <section class="note">
   <h2>TubeAlfred, apagado</h2>

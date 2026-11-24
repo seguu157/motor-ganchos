@@ -10,13 +10,19 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from radar.apify_client import ApifyClient, ApifyError, MissingApifyToken
+from radar.apify_client import ApifyClient, ApifyError, ApifyQuotaError, MissingApifyToken
 from radar.apify_parse import ParsedReel, parse_payload
 from radar.config import Settings
 from radar.cost import CostEstimate, estimate_cost
 from radar.db import Database
 from radar.format_es import format_usd
 from radar.llm import AnalysisDraft, ChatClient, LLMError, analyze_with_client
+from radar.sources.instaloader_source import (
+    InstagramBlocked,
+    InstagramNotConfigured,
+    InstaloaderSource,
+)
+from radar.sources.select import SourcePlan, plan_source
 from radar.transcribe import (
     DownloadError,
     WhisperNotInstalled,
@@ -50,6 +56,7 @@ class RunOutcome:
     reels_saved: int = 0
     status: str = "planned"
     message: str = ""
+    source: str = ""
 
 
 def plan_run(
@@ -152,6 +159,210 @@ def execute_run(
     finally:
         if owns_client:
             client.close()
+
+
+def execute_selected_run(
+    db: Database,
+    settings: Settings,
+    *,
+    client: ApifyClient | None = None,
+    instaloader_source: InstaloaderSource | None = None,
+    reels_per_account: int | None = None,
+    allow_over_budget: bool = False,
+    yes: bool = False,
+    dry_run: bool = False,
+    skip_transcribe: bool = False,
+    skip_llm: bool = False,
+    chat_client: ChatClient | None = None,
+    requested_source: str | None = None,
+) -> RunOutcome:
+    """Elige la fuente y lanza. Apify solo si hay token y el coste cabe.
+
+    Un 402 o un error de cuota cae a Instaloader una vez, sin reintentar Apify.
+    """
+    usernames = db.list_active_usernames()
+    if not usernames:
+        raise NoActiveAccounts("No hay cuentas activas en la watchlist.")
+    limit = reels_per_account or settings.reels_per_account
+    plan = plan_source(
+        settings,
+        usernames,
+        limit,
+        requested=requested_source,
+        allow_over_budget=allow_over_budget,
+    )
+    if dry_run or not yes:
+        return RunOutcome(
+            launched=False,
+            estimate=plan.estimate,
+            needs_confirmation=not dry_run,
+            message="No se ha hecho ninguna petición.",
+            source=plan.effective,
+        )
+    if plan.effective == "instaloader":
+        return _execute_instaloader(
+            db,
+            settings,
+            plan,
+            source=instaloader_source,
+            skip_transcribe=skip_transcribe,
+            skip_llm=skip_llm,
+            chat_client=chat_client,
+        )
+    try:
+        outcome = execute_run(
+            db,
+            settings,
+            client=client,
+            reels_per_account=limit,
+            allow_over_budget=allow_over_budget,
+            yes=True,
+            skip_transcribe=skip_transcribe,
+            skip_llm=skip_llm,
+            chat_client=chat_client,
+        )
+    except ApifyQuotaError as exc:
+        return _execute_instaloader(
+            db,
+            settings,
+            plan_source(
+                settings,
+                usernames,
+                limit,
+                requested="instaloader",
+            ),
+            source=instaloader_source,
+            skip_transcribe=skip_transcribe,
+            skip_llm=skip_llm,
+            chat_client=chat_client,
+            note=(
+                "Apify respondió sin crédito o sin cuota "
+                f"({exc}). No se reintenta Apify. Se usa Instaloader."
+            ),
+        )
+    outcome.source = "apify"
+    return outcome
+
+
+def _execute_instaloader(
+    db: Database,
+    settings: Settings,
+    plan: SourcePlan,
+    *,
+    source: InstaloaderSource | None,
+    skip_transcribe: bool,
+    skip_llm: bool,
+    chat_client: ChatClient | None,
+    note: str = "",
+) -> RunOutcome:
+    owns = False
+    if source is None:
+        if not settings.ig_ready:
+            message = str(InstagramNotConfigured())
+            if note:
+                message = f"{note} {message}"
+            raise InstagramNotConfigured(message)
+        source = InstaloaderSource(
+            settings.ig_username,
+            settings.ig_session_file,
+            max_accounts=settings.ig_max_accounts,
+        )
+        owns = True
+    run_id = db.create_run(reels_requested=plan.estimate.reels_total, estimated_usd="0.00")
+    try:
+        try:
+            items = source.fetch_reels(plan.usernames, plan.estimate.reels_per_account)
+        except InstagramBlocked as exc:
+            saved = _save_parsed(db, exc.partial, run_id=run_id, settings=settings)
+            message = _instaloader_message(note, saved, source, extra=str(exc))
+            db.finish_run(run_id, status="failed", reels_saved=saved, message=message)
+            return RunOutcome(
+                launched=True,
+                estimate=plan.estimate,
+                run_id=run_id,
+                reels_saved=saved,
+                status="failed",
+                message=message,
+                source="instaloader",
+            )
+        saved = _save_parsed(db, items, run_id=run_id, settings=settings)
+        notes = [part for part in (note, f"Fuente instaloader. Guardados {saved} reels.") if part]
+        skipped = plan.skipped or getattr(source, "skipped", [])
+        if skipped:
+            notes.append(f"Cuentas fuera de esta tanda: {', '.join(skipped)}.")
+        warnings = getattr(source, "warnings", [])
+        if warnings:
+            notes.append(" ".join(warnings))
+        if skip_transcribe:
+            notes.append("Transcripción omitida.")
+        else:
+            notes.append(transcribe_pending(db, settings))
+        if skip_llm:
+            notes.append("Análisis omitido.")
+        else:
+            notes.append(analyze_pending(db, settings, chat_client=chat_client))
+        message = " ".join(notes)
+        db.finish_run(run_id, status="succeeded", reels_saved=saved, message=message)
+        return RunOutcome(
+            launched=True,
+            estimate=plan.estimate,
+            run_id=run_id,
+            reels_saved=saved,
+            status="succeeded",
+            message=message,
+            source="instaloader",
+        )
+    except Exception as exc:
+        db.finish_run(run_id, status="failed", reels_saved=0, message=str(exc))
+        raise
+    finally:
+        if owns:
+            source.close()
+
+
+def _save_parsed(db: Database, items: list, *, run_id: int, settings: Settings) -> int:
+    from radar.apify_parse import parse_payload
+
+    parsed = parse_payload(items)
+    return ingest_reels(db, parsed.reels, is_example=False, run_id=run_id, settings=settings)
+
+
+def _instaloader_message(note: str, saved: int, source: InstaloaderSource, *, extra: str) -> str:
+    parts = [part for part in (note, f"Guardados {saved} reels antes de parar.", extra) if part]
+    warnings = getattr(source, "warnings", [])
+    if warnings:
+        parts.append(" ".join(warnings))
+    return " ".join(parts)
+
+
+def describe_plan(plan: SourcePlan) -> str:
+    if plan.effective == "instaloader":
+        lines = [
+            "Estimación antes de lanzar (no es un cargo):",
+            "  Fuente: instaloader",
+            f"  Motivo: {plan.reason}",
+            f"  Cuentas en esta tanda: {plan.estimate.accounts}",
+            f"  Reels por cuenta: {plan.estimate.reels_per_account}",
+            f"  Resultados previstos: {plan.estimate.reels_total}",
+            "  Coste estimado de esta tanda: 0,00 USD",
+            "  Instaloader no usa el crédito de Apify.",
+        ]
+        if plan.skipped:
+            names = ", ".join(f"@{name}" for name in plan.skipped)
+            lines.append(
+                f"  Fuera de esta tanda (máximo {plan.max_accounts}, orden alfabético): {names}"
+            )
+        lines.append(
+            "  Referencia si fuera Apify: "
+            f"{format_usd(plan.apify_estimate.estimated_usd)} "
+            f"({format_usd(plan.apify_estimate.usd_per_1000)} / 1.000)."
+        )
+        lines.append(
+            "  Riesgo: Instagram puede limitar la cuenta que inicia sesión. "
+            "Usa una cuenta secundaria y, si bloquea, una IP residencial."
+        )
+        return "\n".join(lines)
+    return f"Fuente: apify\nMotivo: {plan.reason}\n{describe_estimate(plan.estimate)}"
 
 
 def ingest_reels(

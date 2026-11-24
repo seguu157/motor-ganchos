@@ -15,11 +15,17 @@ from radar.export_md import render_markdown
 from radar.pipeline import (
     NoActiveAccounts,
     OverBudget,
-    describe_estimate,
-    execute_run,
-    plan_run,
+    describe_plan,
+    execute_selected_run,
 )
 from radar.seed import seed_examples, seed_if_needed
+from radar.sources.instaloader_source import (
+    InstagramBlocked,
+    InstagramNotConfigured,
+    InstaloaderNotInstalled,
+    login_secondary_account,
+)
+from radar.sources.select import plan_source
 from radar.usernames import UsernameError, normalize_username
 
 
@@ -37,6 +43,15 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--skip-llm", action="store_true")
     run.add_argument("--reels", type=int, default=None, help="Reels por cuenta. Por defecto 20")
     run.add_argument("--allow-over-budget", action="store_true")
+    run.add_argument(
+        "--source",
+        choices=("auto", "apify", "instaloader"),
+        default=None,
+        help="auto usa Apify si hay token y el coste cabe; si no, Instaloader",
+    )
+
+    login = sub.add_parser("ig-login", help="Inicia sesión en la cuenta secundaria y guarda la sesión")
+    login.add_argument("--username", default=None, help="Cuenta secundaria. Por defecto IG_USERNAME")
 
     serve = sub.add_parser("serve", help="Abre la interfaz web")
     serve.add_argument("--host", default=None)
@@ -75,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "run":
             return _run(db, settings, args)
+        if args.command == "ig-login":
+            return _ig_login(settings, args.username)
         if args.command == "export":
             return _export(db, args.fmt, args.out)
         if args.command == "import":
@@ -85,34 +102,48 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "accounts":
             return _accounts(db, args)
-    except (MissingApifyToken, OverBudget, NoActiveAccounts, ApifyError, UsernameError, ValueError, OSError) as exc:
+    except (
+        MissingApifyToken,
+        OverBudget,
+        NoActiveAccounts,
+        ApifyError,
+        InstagramBlocked,
+        InstagramNotConfigured,
+        InstaloaderNotInstalled,
+        UsernameError,
+        ValueError,
+        OSError,
+    ) as exc:
         print(exc, file=sys.stderr)
         return 2
     return 2
 
 
 def _run(db: Database, settings, args) -> int:
-    estimate, _usernames = plan_run(
-        db,
+    usernames = db.list_active_usernames()
+    if not usernames:
+        raise NoActiveAccounts("No hay cuentas activas en la watchlist.")
+    limit = args.reels or settings.reels_per_account
+    plan = plan_source(
         settings,
-        reels_per_account=args.reels,
+        usernames,
+        limit,
+        requested=args.source,
         allow_over_budget=args.allow_over_budget,
-        yes=False,
-        dry_run=True,
     )
-    print(describe_estimate(estimate))
+    print(describe_plan(plan))
     if args.dry_run:
-        print("Dry-run: no se ha llamado a Apify.")
+        print("Dry-run: no se ha hecho ninguna petición.")
         return 0
     if not args.yes:
         if not sys.stdin.isatty():
-            print("Añade --yes para lanzarla. No se ha llamado a Apify.", file=sys.stderr)
+            print("Añade --yes para lanzarla. No se ha hecho ninguna petición.", file=sys.stderr)
             return 2
         answer = input("¿Lanzar la ingesta de metadatos? [s/N] ").strip().lower()
         if answer not in {"s", "si", "sí", "y", "yes"}:
-            print("Cancelado. No se ha llamado a Apify.")
+            print("Cancelado. No se ha hecho ninguna petición.")
             return 0
-    outcome = execute_run(
+    outcome = execute_selected_run(
         db,
         settings,
         reels_per_account=args.reels,
@@ -120,9 +151,25 @@ def _run(db: Database, settings, args) -> int:
         yes=True,
         skip_transcribe=args.skip_transcribe,
         skip_llm=args.skip_llm,
+        requested_source=args.source,
     )
     print(outcome.message)
     return 0 if outcome.status == "succeeded" else 2
+
+
+def _ig_login(settings, username_arg: str | None) -> int:
+    username = (username_arg or settings.ig_username or "").strip().lstrip("@")
+    if not username:
+        if not sys.stdin.isatty():
+            print("Pasa --username o define IG_USERNAME.", file=sys.stderr)
+            return 2
+        username = input("Usuario de la cuenta secundaria de Instagram: ").strip().lstrip("@")
+    if not username:
+        print("Falta el usuario de la cuenta secundaria.", file=sys.stderr)
+        return 2
+    login_secondary_account(username, settings.ig_session_file)
+    print(f"Sesión guardada en {settings.ig_session_file} para @{username}. La contraseña no se guarda.")
+    return 0
 
 
 def _export(db: Database, fmt: str, out: str) -> int:

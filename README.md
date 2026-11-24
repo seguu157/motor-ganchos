@@ -4,13 +4,13 @@ Motor para Antonio: mirar cuentas de Instagram, encontrar reels que rinden muy p
 
 La interfaz está en español y está pensada para el móvil. El tablero kanban y el teleprompter no están en esta versión: quedan para la fase 2. Aquí hay una lista simple de reels y el banco de outliers.
 
-No inventa métricas. Si un dato no viene de Apify, de la transcripción o de una fixture marcada como ejemplo, no aparece.
+No inventa métricas. Si un dato no viene de Apify, de Instaloader, de la transcripción o de una fixture marcada como ejemplo, no aparece.
 
 ## Qué hace una tanda
 
 1. Lee la watchlist (al empezar: `jordigpt`, `dani_llamazares`, `victorinpublic`, `crawlingmondays`, `gregisenberg`).
-2. Muestra el coste estimado y no llama a Apify hasta que lo confirmas.
-3. Pide unos 20 reels recientes por cuenta al actor `apify/instagram-reel-scraper`, solo metadatos.
+2. Muestra el coste estimado y no llama a nadie hasta que lo confirmas. En modo `auto`, Apify solo se usa si hay token y el coste cabe; si no, entra Instaloader a 0 USD.
+3. Pide unos 20 reels recientes por cuenta. Apify usa el actor `apify/instagram-reel-scraper`, solo metadatos. Instaloader usa una cuenta secundaria y va más despacio.
 4. Calcula la mediana de `videoPlayCount` de esos reels y marca outlier si el reel llega a **2× o más**.
 5. Transcribe en local solo los outliers (faster-whisper, modelo pequeño, CPU).
 6. Pide a un LLM el tipo de gancho, los bloques (gancho, contexto, conflicto, giro, cierre), una plantilla y un guion adaptado. El modelo tiene prohibido inventar cifras; si cuela alguna, la ficha lo avisa.
@@ -73,6 +73,10 @@ No hace falta token. Los tests no llaman a Apify.
 | `OPENAI_BASE_URL` | Por defecto `https://api.openai.com/v1`. |
 | `ANTHROPIC_API_KEY` | Solo si `LLM_PROVIDER=anthropic`. |
 | `TUBEALFRED_API_KEY` | Reservada. No activa nada. Ver más abajo. |
+| `RADAR_SOURCE` | `auto` (por defecto), `apify` o `instaloader`. |
+| `IG_USERNAME` | Cuenta secundaria para Instaloader. No es la cuenta que miras. |
+| `IG_SESSION_FILE` | Fichero de sesión. Por defecto `data/ig.session`. No es la contraseña. |
+| `RADAR_IG_MAX_ACCOUNTS` | Máximo de cuentas por tanda con Instaloader. Por defecto 10. |
 | `RADAR_HOST` / `RADAR_PORT` | Por defecto `127.0.0.1:8000`. |
 
 Copia `.env.example`. Los secretos no se guardan en la base y la pantalla de Ajustes solo dice si están definidos.
@@ -102,13 +106,34 @@ Estos add-ons van apagados a propósito, porque se cobran aparte:
 - `includeDownloadedVideo` (por MB)
 - `includeSharesCount`
 
-`radar run` imprime la estimación antes de lanzar. Sin `--yes` y sin una terminal interactiva no llama a Apify. En la web, el botón exige marcar que has visto la estimación. Si la cifra pasa del crédito de referencia, la tanda no sale salvo que pidas `--allow-over-budget`.
+`radar run` imprime la estimación antes de lanzar. Sin `--yes` y sin una terminal interactiva no llama a nadie. En la web, el botón exige marcar que has visto la estimación. Si eliges Apify y la cifra pasa del crédito, la tanda no sale salvo que pidas `--allow-over-budget`. En `auto`, si no cabe, se cambia a Instaloader y el coste que se imprime es **0,00 USD**.
+
+## Instaloader, el respaldo
+
+Apify sigue siendo la fuente principal. Instaloader es gratuita y se autoaloja: no gasta el crédito de 5 USD.
+
+`RADAR_SOURCE=auto` (el valor por defecto) usa Apify cuando hay `APIFY_TOKEN` y la estimación cabe. Cae a Instaloader si no hay token, si el coste no cabe, si pasas `--source instaloader`, o si Apify responde 402 / sin crédito / sin cuota. Ese fallo de Apify no se reintenta.
+
+Hace falta una **cuenta secundaria** de Instagram, no la cuenta desde la que publicas:
+
+```bash
+# en .env: IG_USERNAME=la_cuenta_secundaria
+radar ig-login
+```
+
+`radar ig-login` llama al login interactivo de Instaloader. La contraseña la pide la librería en la terminal (no se ve al escribir) y **no se guarda** en la base, en los logs de esta app ni en `.env`. Solo se guarda el fichero de sesión (`IG_SESSION_FILE`, por defecto `data/ig.session`, permisos `600`).
+
+La tanda va despacio a propósito: entre 20 y 60 segundos al azar entre cuentas, y una pausa corta entre reels. Como máximo entran 10 cuentas por tanda (las primeras en orden alfabético; el resto se deja para la siguiente). Si Instagram responde 401, 429, checkpoint o pide login, la tanda se para y no se reintenta. Los reels ya leídos se guardan.
+
+**Riesgo.** Esta vía puede limitar o pedir checkpoint a la cuenta que inicia sesión. Usa una cuenta secundaria, de poco valor. Instaloader entra con la IP de la máquina que lanza el comando: si Instagram bloquea el VPS, no insistas desde ahí; lanza `radar run --source instaloader` desde una IP residencial. No subas el ritmo ni bajes las pausas.
+
+Si Instaloader no trae `video_play_count` y sí trae vistas, esas vistas se guardan como reproducciones. Si no, la mediana saldría vacía. El detector sigue usando solo ese campo, igual que con Apify.
 
 La salida normal del actor ya trae `audioUrl` y `videoUrl`. Esas URLs caducan: la transcripción tiene que ir justo después de la ingesta, en la misma tanda.
 
 ## Outliers
 
-Por cada cuenta se toman como máximo los **20 reels más recientes que tienen `videoPlayCount`**. La mediana es la de ese grupo (si hay un número par, la media de los dos centrales). Un reel es outlier si su cifra es **mayor o igual que 2 veces** la mediana. `videoViewCount` no entra.
+Por cada cuenta se toman como máximo los **20 reels más recientes que tienen reproducciones** (`videoPlayCount` en el modelo interno). La mediana es la de ese grupo (si hay un número par, la media de los dos centrales). Un reel es outlier si su cifra es **mayor o igual que 2 veces** la mediana. El campo `videoViewCount` no entra en la mediana; Instaloader solo copia las vistas a las reproducciones cuando no hay play count.
 
 Con un solo reel, la mediana es él mismo: sale 1× y no es outlier. Hace falta el grupo para tener con qué comparar.
 
@@ -162,12 +187,15 @@ La copia JSON es el puente para mover los datos entre el móvil y el ordenador. 
 radar accounts list
 radar accounts add jordigpt
 radar accounts remove jordigpt
+radar ig-login
 radar run --dry-run
 radar run --yes
+radar run --source instaloader --yes
+radar run --source apify --yes
 radar serve
 ```
 
-`radar run --yes` es el comando del cron. Imprime la estimación y luego lanza. `--skip-transcribe` y `--skip-llm` saltan esos pasos.
+`radar run --yes` es el comando del cron. Imprime la fuente y la estimación, y luego lanza. Con Instaloader el coste impreso es 0,00 USD. `--skip-transcribe` y `--skip-llm` saltan esos pasos. `--source` vale `auto`, `apify` o `instaloader`.
 
 ## Docker y cron
 

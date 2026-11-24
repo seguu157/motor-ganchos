@@ -15,6 +15,10 @@ class ApifyError(RuntimeError):
     """La ejecución del actor no terminó bien."""
 
 
+class ApifyQuotaError(ApifyError):
+    """Crédito, cuota o HTTP 402. No se reintenta Apify."""
+
+
 class MissingApifyToken(RuntimeError):
     """No hay APIFY_TOKEN. No se ha hecho ninguna petición."""
 
@@ -55,6 +59,11 @@ class ApifyClient:
         run = self._wait(run)
         status = run.get("status")
         if status != "SUCCEEDED":
+            detail = str(run.get("statusMessage") or "")
+            if _text_is_quota(detail):
+                raise ApifyQuotaError(
+                    "Apify terminó sin crédito o sin cuota. No se reintenta."
+                )
             raise ApifyError(f"La ejecución terminó en estado {status}.")
         dataset_id = run.get("defaultDatasetId")
         if not dataset_id:
@@ -89,5 +98,22 @@ class ApifyClient:
     @staticmethod
     def _decode(response: Any) -> Any:
         if response.status_code >= 400:
+            if response.status_code == 402 or _text_is_quota(_response_text(response)):
+                raise ApifyQuotaError(
+                    f"Apify respondió {response.status_code} (crédito o cuota). No se reintenta."
+                )
             raise ApifyError(f"Apify respondió {response.status_code}.")
         return response.json()
+
+
+def _response_text(response: Any) -> str:
+    try:
+        return str(response.text or "")
+    except Exception:
+        return ""
+
+
+def _text_is_quota(text: str) -> bool:
+    lowered = text.lower()
+    markers = ("quota", "credit", "insufficient", "usage hard limit", "payment required", "402")
+    return any(marker in lowered for marker in markers)

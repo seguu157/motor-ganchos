@@ -10,6 +10,8 @@ services:
       RADAR_HOST: 0.0.0.0
       RADAR_PORT: "8000"
       HF_HOME: /data/huggingface
+      IG_SESSION_FILE: /data/ig.session
+      RADAR_SOURCE: auto
     volumes:
       - radar-data:/data
     restart: unless-stopped

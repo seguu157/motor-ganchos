@@ -11,13 +11,13 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup, escape
 
-from radar.apify_client import MissingApifyToken
 from radar.config import Settings, load_settings
 from radar.db import BankEntry, Database
 from radar.export_json import dumps_document, export_document, filter_entries
 from radar.export_md import render_markdown
 from radar.format_es import format_date, format_int_es, format_multiple, format_usd
-from radar.pipeline import NoActiveAccounts, OverBudget, execute_run, plan_run
+from radar.pipeline import NoActiveAccounts, execute_selected_run
+from radar.sources.select import block_reason, plan_source
 from radar.seed import seed_if_needed
 from radar.tubealfred import TubeAlfredAdapter
 from radar.usernames import UsernameError, normalize_username
@@ -162,6 +162,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         form = await request.form()
         reels = _reels_param(form.get("reels"), settings.reels_per_account)
         allow = form.get("allow_over_budget") == "1"
+        requested = str(form.get("source") or "auto")
         if form.get("confirmo") != "1":
             return _radar_page(
                 render,
@@ -169,27 +170,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 settings,
                 request,
                 reels=reels,
-                error="Marca que has visto la estimación. No se ha llamado a Apify.",
+                requested=requested,
+                error="Marca que has visto la estimación. No se ha hecho ninguna petición.",
                 status_code=400,
             )
-        try:
-            plan_run(
-                db,
-                settings,
-                reels_per_account=reels,
-                allow_over_budget=allow,
-                yes=True,
-            )
-        except (OverBudget, NoActiveAccounts, ValueError) as exc:
-            return _radar_page(render, db, settings, request, reels=reels, error=str(exc), status_code=400)
-        if not settings.apify_token:
+        usernames = db.list_active_usernames()
+        if not usernames:
             return _radar_page(
                 render,
                 db,
                 settings,
                 request,
                 reels=reels,
-                error="Falta APIFY_TOKEN. No se ha hecho ninguna petición.",
+                requested=requested,
+                error="No hay cuentas activas en la watchlist.",
+                status_code=400,
+            )
+        try:
+            plan = plan_source(
+                settings,
+                usernames,
+                reels,
+                requested=requested,
+                allow_over_budget=allow,
+            )
+        except (NoActiveAccounts, ValueError) as exc:
+            return _radar_page(
+                render,
+                db,
+                settings,
+                request,
+                reels=reels,
+                requested=requested,
+                error=str(exc),
+                status_code=400,
+            )
+        blocked = block_reason(settings, plan, allow_over_budget=allow)
+        if blocked:
+            return _radar_page(
+                render,
+                db,
+                settings,
+                request,
+                reels=reels,
+                requested=requested,
+                error=blocked,
                 status_code=400,
             )
         if not _RUN_LOCK.acquire(blocking=False):
@@ -199,21 +224,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 settings,
                 request,
                 reels=reels,
+                requested=requested,
                 error="Ya hay una ingesta en curso.",
                 status_code=409,
             )
 
         def worker() -> None:
             try:
-                execute_run(
+                execute_selected_run(
                     db,
                     settings,
                     reels_per_account=reels,
                     allow_over_budget=allow,
                     yes=True,
+                    requested_source=requested,
                 )
                 db.set_meta("last_error", "")
-            except (MissingApifyToken, OverBudget, NoActiveAccounts, Exception) as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 db.set_meta("last_error", str(exc))
             finally:
                 _RUN_LOCK.release()
@@ -232,6 +259,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             token_listo=bool(settings.apify_token),
             llm_listo=settings.llm_ready,
             tube=tube,
+            ig_listo=settings.ig_ready,
         )
 
     @app.get("/export/banco.md")
@@ -260,33 +288,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-def _radar_page(render, db: Database, settings: Settings, request: Request, *, reels: int | None = None, error: str = "", aviso: str = "", status_code: int = 200) -> HTMLResponse:
+def _radar_page(
+    render,
+    db: Database,
+    settings: Settings,
+    request: Request,
+    *,
+    reels: int | None = None,
+    requested: str | None = None,
+    error: str = "",
+    aviso: str = "",
+    status_code: int = 200,
+) -> HTMLResponse:
     chosen = reels if reels is not None else _reels_param(request.query_params.get("reels"), settings.reels_per_account)
+    source_requested = requested or str(request.query_params.get("source") or settings.radar_source or "auto")
     usernames = db.list_active_usernames()
-    estimate = None
+    plan = None
     plan_error = ""
     if usernames:
-        from radar.cost import estimate_cost
-
-        estimate = estimate_cost(
-            len(usernames),
-            chosen,
-            usd_per_1000=settings.usd_per_1000,
-            monthly_credit_usd=settings.monthly_credit_usd,
-        )
+        try:
+            plan = plan_source(settings, usernames, chosen, requested=source_requested)
+        except ValueError as exc:
+            plan_error = str(exc)
     else:
         plan_error = "No hay cuentas activas en la watchlist."
+    puede_lanzar = plan is not None and block_reason(settings, plan, allow_over_budget=True) is None
+    shown_source = source_requested if source_requested in {"auto", "apify", "instaloader"} else "auto"
     running = db.running_run()
     return render(
         "radar.html",
         nav="radar",
         title="Lanzar radar",
-        estimate=estimate,
+        estimate=plan.apify_estimate if plan else None,
+        plan=plan,
         usernames=usernames,
         reels=chosen,
+        source_requested=shown_source,
         error=error or plan_error,
         aviso=aviso,
         token_listo=bool(settings.apify_token),
+        puede_lanzar=puede_lanzar,
         running=running,
         runs=db.list_runs(),
         last_error=db.get_meta("last_error") or "",

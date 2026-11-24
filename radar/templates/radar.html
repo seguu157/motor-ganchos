@@ -8,7 +8,7 @@
 <section class="page-head">
   <p class="eyebrow">Antes de gastar crédito</p>
   <h1>Estimación de la tanda</h1>
-  <p class="lede">Actor <code>apify/instagram-reel-scraper</code>, solo metadatos. La transcripción de Apify, la descarga de vídeo y los compartidos van apagados: se cobran aparte. Esto es una estimación, no un cargo ni el saldo de tu cuenta.</p>
+  <p class="lede">Apify es la fuente principal. Instaloader es el respaldo gratuito: entra solo si no hay token, si el coste no cabe o si lo eliges. Esto es una estimación, no un cargo ni el saldo de tu cuenta.</p>
 </section>
 
 {% if error %}
@@ -20,6 +20,13 @@
 
 {% if estimate %}
 <form class="receipt" method="get" action="/radar">
+  <label>Fuente
+    <select name="source">
+      <option value="auto" {% if source_requested == "auto" %}selected{% endif %}>Automática</option>
+      <option value="apify" {% if source_requested == "apify" %}selected{% endif %}>Apify</option>
+      <option value="instaloader" {% if source_requested == "instaloader" %}selected{% endif %}>Instaloader</option>
+    </select>
+  </label>
   <label>Reels por cuenta
     <input type="number" name="reels" min="1" max="50" value="{{ reels }}">
   </label>
@@ -32,13 +39,18 @@
     <div><dt>Reels por cuenta</dt><dd>{{ estimate.reels_per_account }}</dd></div>
     <div><dt>Resultados previstos</dt><dd>{{ estimate.reels_total }}</dd></div>
     <div><dt>Tarifa de referencia</dt><dd>{{ estimate.usd_per_1000|usd }} / 1.000</dd></div>
-    <div class="total"><dt>Esta tanda</dt><dd>{{ estimate.estimated_usd|usd }}</dd></div>
+    <div><dt>Fuente de esta tanda</dt><dd>{{ plan.effective }}</dd></div>
+    <div class="total"><dt>Coste de esta fuente</dt><dd>{{ plan.estimate.estimated_usd|usd }}</dd></div>
+    <div><dt>Referencia Apify</dt><dd>{{ estimate.estimated_usd|usd }} · {{ estimate.usd_per_1000|usd }} / 1.000</dd></div>
     <div><dt>Crédito mensual Free</dt><dd>{{ estimate.monthly_credit_usd|usd }}</dd></div>
     <div><dt>Tandas que caben</dt><dd>{{ estimate.runs_fitting_in_credit }}</dd></div>
     <div><dt>Proyección de 4 al mes</dt><dd>{{ estimate.monthly_projection_usd|usd }}</dd></div>
     <div><dt>Reels que caben en el crédito</dt><dd>{{ estimate.reels_fitting_in_credit|es_int }}</dd></div>
   </dl>
-  <p class="fine">Tarifa publicada del plan Free del actor: 2,60 USD por cada 1.000 reels y 5 USD de crédito al mes. Si Apify cambia el precio, ajústalo con APIFY_USD_PER_1000. La proyección semanal no es un cargo.</p>
+  <p class="fine">{{ plan.reason }} Tarifa publicada del plan Free del actor: 2,60 USD por cada 1.000 reels y 5 USD de crédito al mes. Instaloader sale a 0,00 USD. Si Apify cambia el precio, ajústalo con APIFY_USD_PER_1000.</p>
+  {% if plan.effective == "instaloader" %}
+  <p class="fine">Instaloader usa una cuenta secundaria y puede acabar limitada. Si Instagram bloquea, lánzalo desde una IP residencial, no desde el VPS. Máximo {{ plan.max_accounts }} cuentas por tanda.</p>
+  {% endif %}
   <ul class="who">
     {% for username in usernames %}
     <li>@{{ username }}</li>
@@ -48,6 +60,7 @@
 
 <form class="launch" method="post" action="/radar/lanzar">
   <input type="hidden" name="reels" value="{{ reels }}">
+  <input type="hidden" name="source" value="{{ source_requested }}">
   <label class="check">
     <input type="checkbox" name="confirmo" value="1" required>
     He visto la estimación y quiero lanzar la ingesta de metadatos.
@@ -58,9 +71,9 @@
     Esta tanda supera el crédito de referencia. La lanzo igualmente.
   </label>
   {% endif %}
-  <button type="submit" {% if not token_listo %}disabled{% endif %}>Lanzar ingesta</button>
-  {% if not token_listo %}
-  <p class="fine">Falta APIFY_TOKEN. El botón no llama a Apify.</p>
+  <button type="submit" {% if not puede_lanzar %}disabled{% endif %}>Lanzar ingesta</button>
+  {% if not puede_lanzar %}
+  <p class="fine">{% if not token_listo %}Falta APIFY_TOKEN. El botón no llama a Apify.{% else %}Esta fuente no se puede lanzar todavía.{% endif %}</p>
   {% endif %}
 </form>
 {% endif %}
