@@ -34,6 +34,8 @@ class ParsedReel:
     video_duration: float | None
     owner_username: str | None
     raw: dict[str, Any] = field(repr=False)
+    media_kind: str = "reel"
+    slides: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -63,14 +65,18 @@ def parse_item(item: dict[str, Any]) -> ParsedReel:
     instagram_id = _text(_pick(item, "id")) or short_code or url
     if not instagram_id:
         raise ParseError("falta id, shortCode y url.")
-    if not url and short_code:
-        url = f"https://www.instagram.com/reel/{short_code}/"
-    if not url:
-        raise ParseError("falta url.")
 
     owner = _text(_pick(item, "ownerUsername", "owner_username"))
     if owner:
         owner = owner.lstrip("@").lower()
+
+    slides = _slides(item)
+    media_kind = _media_kind(item, slides)
+    if not url and short_code:
+        ruta = "p" if media_kind == "carrusel" else "reel"
+        url = f"https://www.instagram.com/{ruta}/{short_code}/"
+    if not url:
+        raise ParseError("falta url.")
 
     return ParsedReel(
         instagram_id=instagram_id,
@@ -80,12 +86,14 @@ def parse_item(item: dict[str, Any]) -> ParsedReel:
         published_at=_text(_pick(item, "timestamp", "date")),
         likes_count=_as_int(_pick(item, "likesCount", "likes")),
         comments_count=_as_int(_pick(item, "commentsCount", "comments")),
-        video_play_count=_as_int(_pick(item, "videoPlayCount")),
-        video_view_count=_as_int(_pick(item, "videoViewCount")),
-        video_url=_text(_pick(item, "videoUrl")),
-        audio_url=_text(_pick(item, "audioUrl")),
+        video_play_count=None if media_kind == "carrusel" else _as_int(_pick(item, "videoPlayCount")),
+        video_view_count=None if media_kind == "carrusel" else _as_int(_pick(item, "videoViewCount")),
+        video_url=None if media_kind == "carrusel" else _text(_pick(item, "videoUrl")),
+        audio_url=None if media_kind == "carrusel" else _text(_pick(item, "audioUrl")),
         video_duration=_as_float(_pick(item, "videoDuration")),
         owner_username=owner,
+        media_kind=media_kind,
+        slides=slides,
         raw=item,
     )
 
@@ -133,6 +141,46 @@ def _pick(item: dict[str, Any], *keys: str) -> Any:
         if key in item and item[key] is not None:
             return item[key]
     return None
+
+
+def _media_kind(item: dict[str, Any], slides: tuple[dict[str, Any], ...]) -> str:
+    raw = (_text(_pick(item, "productType", "product_type", "mediaKind", "__typename")) or "").casefold()
+    if raw in {"carousel_container", "sidecar", "graphsidecar", "carrusel", "slideshow"}:
+        return "carrusel"
+    if slides:
+        return "carrusel"
+    return "reel"
+
+
+def _slides(item: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    raw = _pick(item, "slides", "childPosts", "sidecarChildren", "carouselMedia")
+    if raw is None and isinstance(item.get("edge_sidecar_to_children"), dict):
+        raw = [
+            edge.get("node")
+            for edge in item["edge_sidecar_to_children"].get("edges") or []
+            if isinstance(edge, dict)
+        ]
+    if not isinstance(raw, list):
+        return ()
+    slides: list[dict[str, Any]] = []
+    for index, child in enumerate(raw, start=1):
+        if not isinstance(child, dict):
+            continue
+        texto = _text(_pick(child, "texto", "text", "caption", "accessibility_caption")) or ""
+        if not texto and isinstance(child.get("edge_media_to_caption"), dict):
+            edges = child["edge_media_to_caption"].get("edges") or []
+            if edges and isinstance(edges[0], dict):
+                texto = _text((edges[0].get("node") or {}).get("text")) or ""
+        imagen = _text(_pick(child, "display_url", "imageUrl", "imagen"))
+        slides.append(
+            {
+                "indice": int(child.get("indice") or index),
+                "texto": texto,
+                "origen": "texto" if texto else "vacio",
+                "imagen": imagen,
+            }
+        )
+    return tuple(slides)
 
 
 def _text(value: Any) -> str | None:

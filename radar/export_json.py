@@ -85,13 +85,41 @@ def filter_entries(
     date_from: str | None = None,
     date_to: str | None = None,
     hide_examples: bool = False,
+    category: str | None = None,
+    media_kind: str | None = None,
+    query: str | None = None,
 ) -> list[BankEntry]:
+    from radar.texto import plegar
+
+    needle = plegar(query) if query else ""
     selected: list[BankEntry] = []
     for entry in entries:
         if account and entry.account != account:
             continue
         if hook_type and (entry.hook_type or "") != hook_type:
             continue
+        if category and entry.categoria != category:
+            continue
+        if media_kind and entry.media_kind != media_kind:
+            continue
+        if needle:
+            haystack = plegar(
+                " ".join(
+                    part
+                    for part in (
+                        entry.hook,
+                        entry.caption,
+                        entry.template,
+                        entry.adapted_script,
+                        entry.account,
+                        entry.hook_type,
+                        entry.categoria,
+                    )
+                    if part
+                )
+            )
+            if needle not in haystack:
+                continue
         if min_multiple is not None:
             if entry.multiple is None or entry.multiple < min_multiple:
                 continue

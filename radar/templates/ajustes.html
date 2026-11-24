@@ -50,6 +50,14 @@
     <dd>{{ settings.radar_source }}</dd>
   </div>
   <div>
+    <dt>Navegador</dt>
+    <dd>perfil {{ settings.browser_profile }} · sesión {{ "lista" if navegador_listo else "no lista" }} · máximo {{ settings.browser_max_accounts }} cuentas y {{ settings.browser_max_posts }} posts · pausa de cuentas {{ settings.browser_pause_account[0]|int }}-{{ settings.browser_pause_account[1]|int }} s</dd>
+  </div>
+  <div>
+    <dt>Peso de un comentario</dt>
+    <dd>{{ settings.comment_weight }} me gusta. Solo entra en la mediana de carruseles.</dd>
+  </div>
+  <div>
     <dt>Instaloader</dt>
     <dd>{% if settings.ig_username %}@{{ settings.ig_username }}{% else %}usuario no definido{% endif %} · sesión {{ "lista" if ig_listo else "no lista" }} · máximo {{ settings.ig_max_accounts }} cuentas</dd>
   </div>

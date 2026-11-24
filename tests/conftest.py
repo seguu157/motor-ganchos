@@ -22,12 +22,19 @@ def _entorno_limpio(monkeypatch):
         "IG_USERNAME",
         "IG_SESSION_FILE",
         "RADAR_IG_MAX_ACCOUNTS",
+        "IG_BROWSER_PROFILE",
+        "RADAR_BROWSER_MAX_ACCOUNTS",
+        "RADAR_BROWSER_MAX_POSTS",
+        "RADAR_BROWSER_PAUSE_ACCOUNT",
+        "RADAR_BROWSER_PAUSE_POST",
+        "RADAR_COMMENT_WEIGHT",
     ):
         monkeypatch.delenv(key, raising=False)
 
 
 def make_settings(monkeypatch, tmp_path, **env):
     monkeypatch.setenv("RADAR_DB", str(tmp_path / "radar.sqlite"))
+    monkeypatch.setenv("IG_BROWSER_PROFILE", str(tmp_path / "ig-browser"))
     for key, value in env.items():
         if value is None:
             monkeypatch.delenv(key, raising=False)

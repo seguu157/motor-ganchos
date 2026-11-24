@@ -14,7 +14,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from radar.outliers import DEFAULT_SAMPLE_SIZE, DEFAULT_THRESHOLD, PlaySample, detect_outliers
+from radar.categorias import categoria_de
+from radar.outliers import (
+    DEFAULT_COMMENT_WEIGHT,
+    DEFAULT_SAMPLE_SIZE,
+    DEFAULT_THRESHOLD,
+    PlaySample,
+    detect_outliers,
+    engagement_score,
+)
+from radar.perfil import CAMPOS, Perfil, perfil_desde_dict
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -90,6 +99,35 @@ CREATE TABLE IF NOT EXISTS analyses (
     raw_response TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS perfil (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    marca TEXT NOT NULL DEFAULT '',
+    oferta TEXT NOT NULL DEFAULT '',
+    audiencia TEXT NOT NULL DEFAULT '',
+    problema TEXT NOT NULL DEFAULT '',
+    tono TEXT NOT NULL DEFAULT '',
+    idioma TEXT NOT NULL DEFAULT 'es',
+    pruebas TEXT NOT NULL DEFAULT '',
+    restricciones TEXT NOT NULL DEFAULT '',
+    cta TEXT NOT NULL DEFAULT '',
+    nicho TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS proyectos (
+    id INTEGER PRIMARY KEY,
+    titulo TEXT NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'borrador',
+    paso TEXT NOT NULL DEFAULT 'oferta',
+    perfil_json TEXT NOT NULL DEFAULT '{}',
+    referencias_json TEXT NOT NULL DEFAULT '[]',
+    hook_reel_id INTEGER,
+    guion TEXT NOT NULL DEFAULT '',
+    variantes_json TEXT NOT NULL DEFAULT '[]',
+    notas TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -123,6 +161,12 @@ class BankEntry:
     transcript_error: str | None = None
     analysis_error: str | None = None
     video_duration: float | None = None
+    media_kind: str = "reel"
+    slides: list[dict[str, Any]] = field(default_factory=list)
+    segments: list[dict[str, Any]] = field(default_factory=list)
+    engagement_score: float | None = None
+    comment_weight: float | None = None
+    categoria: str = ""
 
 
 class Database:
@@ -140,6 +184,10 @@ class Database:
     def migrate(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            _ensure_column(conn, "reels", "media_kind", "TEXT NOT NULL DEFAULT 'reel'")
+            _ensure_column(conn, "reels", "slides_json", "TEXT")
+            _ensure_column(conn, "reels", "engagement_score", "REAL")
+            _ensure_column(conn, "reels", "comment_weight", "REAL")
 
     def get_meta(self, key: str) -> str | None:
         with self.connect() as conn:
@@ -209,8 +257,9 @@ class Database:
                 INSERT INTO reels (
                     account_id, run_id, instagram_id, short_code, url, caption, published_at,
                     likes_count, comments_count, video_play_count, video_view_count,
-                    video_url, audio_url, video_duration, is_example, raw_json, fetched_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    video_url, audio_url, video_duration, is_example, raw_json, fetched_at,
+                    media_kind, slides_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(instagram_id) DO UPDATE SET
                     account_id = excluded.account_id,
                     run_id = COALESCE(excluded.run_id, reels.run_id),
@@ -227,7 +276,9 @@ class Database:
                     video_duration = excluded.video_duration,
                     is_example = excluded.is_example,
                     raw_json = excluded.raw_json,
-                    fetched_at = excluded.fetched_at
+                    fetched_at = excluded.fetched_at,
+                    media_kind = excluded.media_kind,
+                    slides_json = excluded.slides_json
                 """,
                 (
                     account_id,
@@ -247,6 +298,8 @@ class Database:
                     1 if is_example else 0,
                     raw,
                     now,
+                    getattr(reel, "media_kind", None) or "reel",
+                    json.dumps(list(getattr(reel, "slides", ()) or ()), ensure_ascii=False),
                 ),
             )
             row = conn.execute("SELECT id FROM reels WHERE instagram_id = ?", (reel.instagram_id,)).fetchone()
@@ -278,49 +331,86 @@ class Database:
         *,
         sample_size: int = DEFAULT_SAMPLE_SIZE,
         threshold: float = DEFAULT_THRESHOLD,
+        comment_weight: float = DEFAULT_COMMENT_WEIGHT,
     ) -> int:
         with self.connect() as conn:
             rows = conn.execute(
                 """
                 SELECT reels.id, reels.instagram_id, reels.video_play_count, reels.published_at,
+                       reels.likes_count, reels.comments_count, reels.media_kind,
                        accounts.username AS account
                 FROM reels JOIN accounts ON accounts.id = reels.account_id
                 """
             ).fetchall()
-        samples = [
-            PlaySample(
-                reel_key=row["instagram_id"],
-                account=row["account"],
-                play_count=row["video_play_count"],
-                published_at=row["published_at"],
-            )
-            for row in rows
-        ]
+        reel_samples: list[PlaySample] = []
+        carousel_samples: list[PlaySample] = []
+        engagement: dict[str, int | None] = {}
+        for row in rows:
+            kind = row["media_kind"] or "reel"
+            if kind == "carrusel":
+                score = engagement_score(row["likes_count"], row["comments_count"], weight=comment_weight)
+                engagement[row["instagram_id"]] = score
+                carousel_samples.append(
+                    PlaySample(
+                        reel_key=row["instagram_id"],
+                        account=row["account"],
+                        play_count=score,
+                        published_at=row["published_at"],
+                    )
+                )
+            else:
+                reel_samples.append(
+                    PlaySample(
+                        reel_key=row["instagram_id"],
+                        account=row["account"],
+                        play_count=row["video_play_count"],
+                        published_at=row["published_at"],
+                    )
+                )
         scores = {
             score.reel_key: score
-            for score in detect_outliers(samples, sample_size=sample_size, threshold=threshold)
+            for score in detect_outliers(reel_samples, sample_size=sample_size, threshold=threshold)
         }
+        scores.update(
+            {
+                score.reel_key: score
+                for score in detect_outliers(carousel_samples, sample_size=sample_size, threshold=threshold)
+            }
+        )
         with self.connect() as conn:
             for row in rows:
+                kind = row["media_kind"] or "reel"
                 score = scores.get(row["instagram_id"])
+                points = engagement.get(row["instagram_id"]) if kind == "carrusel" else None
+                weight = comment_weight if kind == "carrusel" else None
                 if score is None:
                     conn.execute(
                         """
                         UPDATE reels
-                        SET median_plays = NULL, multiple = NULL, is_outlier = 0, sample_size = NULL
+                        SET median_plays = NULL, multiple = NULL, is_outlier = 0, sample_size = NULL,
+                            engagement_score = ?, comment_weight = ?
                         WHERE id = ?
                         """,
-                        (row["id"],),
+                        (points, weight, row["id"]),
                     )
                 else:
                     multiple = None if score.multiple is None else float(score.multiple)
                     conn.execute(
                         """
                         UPDATE reels
-                        SET median_plays = ?, multiple = ?, is_outlier = ?, sample_size = ?
+                        SET median_plays = ?, multiple = ?, is_outlier = ?, sample_size = ?,
+                            engagement_score = ?, comment_weight = ?
                         WHERE id = ?
                         """,
-                        (score.median_plays, multiple, 1 if score.is_outlier else 0, score.sample_size, row["id"]),
+                        (
+                            score.median_plays,
+                            multiple,
+                            1 if score.is_outlier else 0,
+                            score.sample_size,
+                            points,
+                            weight,
+                            row["id"],
+                        ),
                     )
         return sum(1 for score in scores.values() if score.is_outlier)
 
@@ -412,6 +502,7 @@ class Database:
                 SELECT reels.*, accounts.username AS account,
                        transcripts.text AS transcript_text,
                        transcripts.hook_text AS hook_text,
+                       transcripts.segments_json AS segments_json,
                        analyses.hook_type AS hook_type,
                        analyses.blocks_json AS blocks_json,
                        analyses.template_text AS template_text,
@@ -433,6 +524,99 @@ class Database:
                 return entry
         return None
 
+    def update_slides(self, reel_id: int, slides: list[dict[str, Any]]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE reels SET slides_json = ? WHERE id = ?",
+                (json.dumps(slides, ensure_ascii=False), reel_id),
+            )
+
+    def carruseles_sin_transcripcion(self) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT reels.*, accounts.username AS account
+                FROM reels
+                JOIN accounts ON accounts.id = reels.account_id
+                LEFT JOIN transcripts ON transcripts.reel_id = reels.id
+                WHERE reels.media_kind = 'carrusel'
+                  AND reels.is_outlier = 1
+                  AND transcripts.reel_id IS NULL
+                ORDER BY reels.id
+                """
+            ).fetchall()
+
+    def get_perfil(self) -> Perfil:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM perfil WHERE id = 1").fetchone()
+        if row is None:
+            return Perfil()
+        return perfil_desde_dict({campo: row[campo] for campo in CAMPOS})
+
+    def save_perfil(self, perfil: Perfil) -> None:
+        datos = perfil.as_dict()
+        columnas = ", ".join(CAMPOS)
+        placeholders = ", ".join("?" for _ in CAMPOS)
+        updates = ", ".join(f"{campo} = excluded.{campo}" for campo in CAMPOS)
+        with self.connect() as conn:
+            conn.execute(
+                f"""
+                INSERT INTO perfil(id, {columnas})
+                VALUES(1, {placeholders})
+                ON CONFLICT(id) DO UPDATE SET {updates}
+                """,
+                tuple(datos[campo] for campo in CAMPOS),
+            )
+
+    def create_proyecto(self, titulo: str, *, perfil_json: str) -> int:
+        now = utc_now()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO proyectos(
+                    titulo, estado, paso, perfil_json, referencias_json, guion,
+                    variantes_json, notas, created_at, updated_at
+                ) VALUES(?, 'borrador', 'oferta', ?, '[]', '', '[]', '', ?, ?)
+                """,
+                (titulo, perfil_json, now, now),
+            )
+            return int(cursor.lastrowid)
+
+    def list_proyectos(self) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return conn.execute("SELECT * FROM proyectos ORDER BY id DESC").fetchall()
+
+    def get_proyecto(self, proyecto_id: int) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute("SELECT * FROM proyectos WHERE id = ?", (proyecto_id,)).fetchone()
+
+    def update_proyecto(self, proyecto_id: int, **fields: Any) -> None:
+        allowed = {
+            "titulo",
+            "estado",
+            "paso",
+            "perfil_json",
+            "referencias_json",
+            "hook_reel_id",
+            "guion",
+            "variantes_json",
+            "notas",
+        }
+        assignments = []
+        values: list[Any] = []
+        for key, value in fields.items():
+            if key not in allowed:
+                raise ValueError(f"Campo de proyecto no permitido: {key}")
+            assignments.append(f"{key} = ?")
+            values.append(value)
+        if not assignments:
+            return
+        assignments.append("updated_at = ?")
+        values.append(utc_now())
+        values.append(proyecto_id)
+        with self.connect() as conn:
+            conn.execute(f"UPDATE proyectos SET {', '.join(assignments)} WHERE id = ?", values)
+
     def outliers_missing_transcript(self) -> list[sqlite3.Row]:
         with self.connect() as conn:
             return conn.execute(
@@ -441,7 +625,9 @@ class Database:
                 FROM reels
                 JOIN accounts ON accounts.id = reels.account_id
                 LEFT JOIN transcripts ON transcripts.reel_id = reels.id
-                WHERE reels.is_outlier = 1 AND transcripts.reel_id IS NULL
+                WHERE reels.is_outlier = 1
+                  AND transcripts.reel_id IS NULL
+                  AND COALESCE(reels.media_kind, 'reel') != 'carrusel'
                 ORDER BY reels.id
                 """
             ).fetchall()
@@ -499,6 +685,9 @@ class Database:
     def _bank_entry(row: sqlite3.Row) -> BankEntry:
         blocks = json.loads(row["blocks_json"]) if row["blocks_json"] else []
         warnings = json.loads(row["warnings_json"]) if row["warnings_json"] else []
+        slides = json.loads(row["slides_json"]) if row["slides_json"] else []
+        segments = json.loads(row["segments_json"]) if row["segments_json"] else []
+        media_kind = row["media_kind"] or "reel"
         return BankEntry(
             reel_id=row["id"],
             account=row["account"],
@@ -524,4 +713,16 @@ class Database:
             transcript_error=row["transcript_error"],
             analysis_error=row["analysis_error"],
             video_duration=row["video_duration"],
+            media_kind=media_kind,
+            slides=slides if isinstance(slides, list) else [],
+            segments=segments if isinstance(segments, list) else [],
+            engagement_score=row["engagement_score"],
+            comment_weight=row["comment_weight"],
+            categoria=categoria_de(row["hook_type"], media_kind),
         )
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, name: str, ddl: str) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if name not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")

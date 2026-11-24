@@ -1,35 +1,51 @@
 # Radar de ganchos
 
-Motor para Antonio: mirar cuentas de Instagram, encontrar reels que rinden muy por encima de lo normal, sacarles el formato y proponer un guion con huecos `[X]` donde haga falta una experiencia real.
+Motor para Antonio: mirar cuentas de Instagram, encontrar reels y carruseles que rinden muy por encima de lo normal, sacarles el formato y proponer un guion con huecos `[X]` donde haga falta una experiencia real.
 
-La interfaz está en español y está pensada para el móvil. El tablero kanban y el teleprompter no están en esta versión: quedan para la fase 2. Aquí hay una lista simple de reels y el banco de outliers.
+La interfaz está en español. La biblioteca filtra por categoría, formato y texto. Cada ficha tiene gancho, receta, prompts, ajustes, ideas, monetización y adaptación al perfil. El flujo guiado va de la oferta al Markdown. El tablero kanban y el teleprompter no están: quedan para más adelante.
 
-No inventa métricas. Si un dato no viene de Apify, de Instaloader, de la transcripción o de una fixture marcada como ejemplo, no aparece.
+No inventa métricas. Si un dato no viene del navegador, de Apify, de Instaloader, de la transcripción, del OCR o de una fixture marcada como ejemplo, no aparece.
 
 ## Qué hace una tanda
 
 1. Lee la watchlist (al empezar: `jordigpt`, `dani_llamazares`, `victorinpublic`, `crawlingmondays`, `gregisenberg`).
-2. Muestra el coste estimado y no llama a nadie hasta que lo confirmas. En modo `auto`, Apify solo se usa si hay token y el coste cabe; si no, entra Instaloader a 0 USD.
-3. Pide unos 20 reels recientes por cuenta. Apify usa el actor `apify/instagram-reel-scraper`, solo metadatos. Instaloader usa una cuenta secundaria y va más despacio.
-4. Calcula la mediana de `videoPlayCount` de esos reels y marca outlier si el reel llega a **2× o más**.
-5. Transcribe en local solo los outliers (faster-whisper, modelo pequeño, CPU).
-6. Pide a un LLM el tipo de gancho, los bloques (gancho, contexto, conflicto, giro, cierre), una plantilla y un guion adaptado. El modelo tiene prohibido inventar cifras; si cuela alguna, la ficha lo avisa.
+2. Muestra la estimación y no llama a nadie hasta que lo confirmas. La fuente por defecto es el navegador (0 USD). Apify e Instaloader se eligen con `--source`.
+3. Pide como máximo 20 posts recientes por cuenta, con pausas al azar y un tope de perfiles. Solo cuentas públicas de la watchlist.
+4. En un reel, la mediana es la de `videoPlayCount` de los últimos 20 con cifra. En un carrusel no hay reproducciones: la cifra es `me gusta + 4 × comentarios`, contra la mediana de los últimos carruseles de esa cuenta. Outlier si llega a **2× o más**. El 4 es una regla de esta app para que un comentario pese más; no es una métrica de Instagram. Si falta me gusta o comentarios, ese carrusel no entra en la mediana.
+5. Transcribe en local solo los reels outlier (faster-whisper). En un carrusel junta el texto de las diapositivas y, si falta, pasa OCR. Las imágenes se borran al terminar salvo `--conservar-imagenes`.
+6. Pide a un LLM el tipo de gancho, los bloques, una plantilla y un guion adaptado al perfil. El modelo tiene prohibido inventar cifras; si cuela alguna, la ficha lo avisa. La ficha arma además los siete bloques y el desglose con las marcas de tiempo que ya trae la transcripción.
 7. Guarda todo en SQLite.
 
-## Arranque en local
+## Arranque en Windows
 
-Hace falta Python 3.11 o superior.
+Hace falta Python 3.11 o superior y PowerShell. Desde la carpeta del proyecto:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,browser,ocr]"
+python -m playwright install chromium
+copy .env.example .env
 radar seed
+radar login
 radar serve
 ```
 
+`radar login` abre Chromium. Entras tú, con la cuenta secundaria, en la ventana. Radar no pide la contraseña y no la guarda: solo queda el perfil del navegador en `data\ig-browser`. Cuando veas el inicio de Instagram, vuelve a la terminal y pulsa Enter.
+
+El scraping con sesión va contra las condiciones de Instagram y puede llevar al bloqueo de la cuenta secundaria.
+
 Abre http://127.0.0.1:8000 . La primera vez, si la base está vacía, carga sola la watchlist y los reels de ejemplo. Esas cifras no son reales: la interfaz lo dice en un aviso amarillo.
+
+El OCR es `rapidocr-onnxruntime` (el extra `ocr`). No hace falta instalar Tesseract. Si no lo instalas, los carruseles que ya traen texto se leen igual; los que solo tienen imagen quedan con un aviso y sin gancho inventado.
+
+Whisper va aparte, porque el modelo pesa:
+
+```powershell
+python -m pip install -r requirements-whisper.txt
+```
+
+En bash el equivalente del entorno es `python3 -m venv .venv` y `source .venv/bin/activate`. El resto de los comandos es el mismo. La imagen Docker no trae Chromium: el navegador está pensado para el ordenador de Antonio, no para el VPS.
 
 ## Capturas
 
@@ -75,10 +91,16 @@ No hace falta token. Los tests no llaman a Apify.
 | `OPENAI_BASE_URL` | Por defecto `https://api.openai.com/v1`. |
 | `ANTHROPIC_API_KEY` | Solo si `RADAR_LLM=anthropic`. |
 | `TUBEALFRED_API_KEY` | Reservada. No activa nada. Ver más abajo. |
-| `RADAR_SOURCE` | `auto` (por defecto), `apify` o `instaloader`. |
+| `RADAR_SOURCE` | `playwright` (por defecto), `apify`, `instaloader` o `auto`. |
 | `IG_USERNAME` | Cuenta secundaria para Instaloader. No es la cuenta que miras. |
 | `IG_SESSION_FILE` | Fichero de sesión. Por defecto `data/ig.session`. No es la contraseña. |
 | `RADAR_IG_MAX_ACCOUNTS` | Máximo de cuentas por tanda con Instaloader. Por defecto 10. |
+| `IG_BROWSER_PROFILE` | Carpeta de la sesión de Chromium. Por defecto `data/ig-browser`. |
+| `RADAR_BROWSER_MAX_ACCOUNTS` | Máximo de perfiles por tanda con el navegador. Por defecto 5. |
+| `RADAR_BROWSER_MAX_POSTS` | Máximo de posts por perfil. Por defecto 20. |
+| `RADAR_BROWSER_PAUSE_ACCOUNT` | Pausa al azar entre perfiles, `mínimo-máximo` en segundos. Por defecto `25-70`. |
+| `RADAR_BROWSER_PAUSE_POST` | Pausa al azar entre páginas del mismo perfil. Por defecto `3-8`. |
+| `RADAR_COMMENT_WEIGHT` | Cuántos me gusta vale un comentario en un carrusel. Por defecto `4`. |
 | `RADAR_HOST` / `RADAR_PORT` | Por defecto `127.0.0.1:8000`. |
 
 Copia `.env.example`. Los secretos no se guardan en la base y la pantalla de Ajustes solo dice si están definidos.
@@ -108,13 +130,31 @@ Estos add-ons van apagados a propósito, porque se cobran aparte:
 - `includeDownloadedVideo` (por MB)
 - `includeSharesCount`
 
-`radar run` imprime la estimación antes de lanzar. Sin `--yes` y sin una terminal interactiva no llama a nadie. En la web, el botón exige marcar que has visto la estimación. Si eliges Apify y la cifra pasa del crédito, la tanda no sale salvo que pidas `--allow-over-budget`. En `auto`, si no cabe, se cambia a Instaloader y el coste que se imprime es **0,00 USD**.
+`radar run` imprime la estimación antes de lanzar. Sin `--yes` y sin una terminal interactiva no llama a nadie. En la web, el botón exige marcar que has visto la estimación. Si eliges Apify y la cifra pasa del crédito, la tanda no sale salvo que pidas `--allow-over-budget`. En `auto`, si no hay sesión de navegador y la estimación de Apify no cabe, se cambia a Instaloader y el coste que se imprime es **0,00 USD**.
+
+## Navegador, la fuente por defecto
+
+Hace falta una **cuenta secundaria**. `radar login` abre Chromium una vez. La contraseña no entra en el código, ni en la base, ni en los logs: la escribes en la ventana del navegador. El perfil queda en `IG_BROWSER_PROFILE`.
+
+La tanda va despacio a propósito: entre 25 y 70 segundos al azar entre perfiles, y entre 3 y 8 entre la página de reels y la de posts. Como máximo entran 5 perfiles y 20 posts por perfil. Si Instagram responde 401, 429, checkpoint o challenge, la tanda se para, se guardan los posts ya leídos y no se reintenta.
+
+Solo se abren los perfiles de la watchlist. Una cuenta privada se omite. No se leen mensajes, seguidores ni cuentas que no estés vigilando.
+
+El scraping con sesión va contra las condiciones de Instagram y puede llevar al bloqueo de la cuenta secundaria.
+
+```powershell
+radar login
+radar run --dry-run
+radar run --yes
+radar run --source apify --yes
+radar run --source instaloader --yes
+```
 
 ## Instaloader, el respaldo
 
-Apify sigue siendo la fuente principal. Instaloader es gratuita y se autoaloja: no gasta el crédito de 5 USD.
+Instaloader es la alternativa gratuita si no quieres el navegador. No gasta el crédito de 5 USD.
 
-`RADAR_SOURCE=auto` (el valor por defecto) usa Apify cuando hay `APIFY_TOKEN` y la estimación cabe. Cae a Instaloader si no hay token, si el coste no cabe, si pasas `--source instaloader`, o si Apify responde 402 / sin crédito / sin cuota. Ese fallo de Apify no se reintenta.
+`RADAR_SOURCE=auto` usa el navegador si ya hay sesión. Si no la hay, usa Apify cuando hay `APIFY_TOKEN` y la estimación cabe. Cae a Instaloader si no hay token, si el coste no cabe, si pasas `--source instaloader`, o si Apify responde 402 / sin crédito / sin cuota. Ese fallo de Apify no se reintenta. El valor por defecto de `RADAR_SOURCE` es `playwright`, no `auto`.
 
 Hace falta una **cuenta secundaria** de Instagram, no la cuenta desde la que publicas:
 
@@ -213,22 +253,66 @@ radar import json copia.json
 
 La copia JSON es el puente para mover los datos entre el móvil y el ordenador. La base es un solo SQLite y todo pasa por `radar/db.py`, para poder cambiarla más adelante por un almacén remoto sin rehacer la interfaz.
 
+## Perfil, biblioteca y flujo
+
+El perfil guarda marca, oferta, audiencia, problema, tono, idioma, pruebas, restricciones, CTA y nicho. Lo que dejes vacío se ve como `[X]`.
+
+```powershell
+radar perfil ver
+radar perfil guardar --oferta "Acompañamiento para montar el flujo" --cta "Escríbeme" --nicho "IA, negocio de una persona, Grok Bot"
+radar banco
+radar banco --categoria "pregunta de apertura" --q pestanas
+radar banco --formato carrusel --ocultar-ejemplos
+```
+
+La categoría sale del tipo de gancho (pregunta de apertura, choque de expectativa, lista o pasos, relato en primera persona, muestra de herramienta, error y corrección, contraste, novedad, lectura por diapositivas, sin clasificar). El formato es reel o carrusel. La búsqueda ignora los acentos.
+
+El flujo no acepta un ejemplo: solo un outlier con métricas guardadas. Las variantes cambian el cierre de esa plantilla; no inventan otro formato.
+
+```powershell
+radar flujo nuevo "Cierre de la semana"
+radar flujo list
+radar flujo oferta 1 --oferta "Acompañamiento para montar el flujo" --cta "Escríbeme"
+radar flujo referencias 1 --reel 12
+radar flujo hook 1 --reel 12
+radar flujo guion 1
+radar flujo variantes 1
+radar flujo revision 1 --notas "Sin cifras nuevas" --aprobar
+radar flujo exportar 1 --out pieza.md
+radar flujo ver 1
+```
+
+En la web son `/perfil` y `/flujo`. La biblioteca sigue en `/banco`.
+
+## Carruseles
+
+Un carrusel se guarda con el texto de cada diapositiva. Si una diapositiva no trae texto y sí una imagen de Instagram, el OCR local la lee y el fichero se borra. `--conservar-imagenes` deja la copia en `data/slides`. No se descargan imágenes de otros hosts.
+
+El gancho es la primera diapositiva. La plantilla tiene un `[X]` por diapositiva, con el papel de cada una (gancho, desarrollo, cierre). Hace falta más de un carrusel con me gusta y comentarios en la cuenta: con uno solo el múltiplo es 1× y no entra en el banco.
+
 ## CLI
 
-```bash
+```powershell
 radar accounts list
 radar accounts add jordigpt
 radar accounts remove jordigpt
+radar login
 radar ig-login
+radar perfil ver
+radar perfil guardar --cta "Escríbeme"
+radar banco --q pestanas
+radar flujo list
 radar llm-check
 radar run --dry-run
 radar run --yes
+radar run --source playwright --yes
 radar run --source instaloader --yes
 radar run --source apify --yes
+radar run --conservar-imagenes --yes
 radar serve
 ```
 
-`radar run --yes` es el comando del cron. Imprime la fuente y la estimación, y luego lanza. Con Instaloader el coste impreso es 0,00 USD. `--skip-transcribe` y `--skip-llm` saltan esos pasos. `--source` vale `auto`, `apify` o `instaloader`.
+`radar run --yes` es el comando del cron. Imprime la fuente y la estimación, y luego lanza. Con el navegador o con Instaloader el coste impreso es 0,00 USD. `--skip-transcribe` y `--skip-llm` saltan esos pasos. `--source` vale `playwright`, `apify`, `instaloader` o `auto`.
 
 ## Docker y cron
 
@@ -267,6 +351,6 @@ YouTube queda fuera. `TUBEALFRED_API_KEY` solo se lee para decir, en Ajustes, si
 
 Sirven para que el banco no esté vacío y para los tests de outliers, del parser y del Markdown.
 
-## Fase 2
+## Más adelante
 
-Tablero por estados y modo teleprompter para grabar varios reels seguidos. Esta versión no los incluye.
+Tablero por estados y modo teleprompter. Favoritos, edición semanal y YouTube siguen fuera. El detalle está en `docs/PLAN-MEJORAS.md`.

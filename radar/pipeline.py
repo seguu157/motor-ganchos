@@ -6,6 +6,7 @@ Sin `APIFY_TOKEN` tampoco. Los tests pasan un cliente falso y no abren la red.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import time
 from dataclasses import dataclass
@@ -19,10 +20,18 @@ from radar.db import Database
 from radar.format_es import format_usd
 from radar.llm import AnalysisDraft, ChatClient, LLMError, analyze_with_client
 from radar.llm_codex import CodexNotInstalled, CodexNotLoggedIn, CodexRateLimit
+from radar.carrusel import completar_diapositivas, texto_unido
+from radar.hooks import first_sentence
+from radar.ocr import OcrNotInstalled, leer_imagen
 from radar.sources.instaloader_source import (
     InstagramBlocked,
     InstagramNotConfigured,
     InstaloaderSource,
+)
+from radar.sources.playwright_source import (
+    BrowserBlocked,
+    BrowserNotConfigured,
+    PlaywrightSource,
 )
 from radar.sources.select import SourcePlan, plan_source
 from radar.transcribe import (
@@ -134,14 +143,18 @@ def execute_run(
         notes = [f"Guardados {saved} reels."]
         if parsed.errors:
             notes.append(f"{len(parsed.errors)} elementos no se pudieron leer.")
-        if skip_transcribe:
-            notes.append("Transcripción omitida.")
-        else:
-            notes.append(transcribe_pending(db, settings))
-        if skip_llm:
-            notes.append("Análisis omitido.")
-        else:
-            notes.append(analyze_pending(db, settings, chat_client=chat_client))
+        notes.extend(
+            _pasos_posteriores(
+                db,
+                settings,
+                skip_transcribe=skip_transcribe,
+                skip_llm=skip_llm,
+                chat_client=chat_client,
+                conservar_imagenes=False,
+                ocr=None,
+                image_downloader=None,
+            )
+        )
         message = " ".join(notes)
         db.finish_run(run_id, status="succeeded", reels_saved=saved, message=message)
         return RunOutcome(
@@ -177,6 +190,10 @@ def execute_selected_run(
     skip_llm: bool = False,
     chat_client: ChatClient | None = None,
     requested_source: str | None = None,
+    browser_source: PlaywrightSource | None = None,
+    conservar_imagenes: bool = False,
+    ocr=None,
+    image_downloader=None,
 ) -> RunOutcome:
     """Elige la fuente y lanza. Apify solo si hay token y el coste cabe.
 
@@ -200,6 +217,19 @@ def execute_selected_run(
             needs_confirmation=not dry_run,
             message="No se ha hecho ninguna petición.",
             source=plan.effective,
+        )
+    if plan.effective == "playwright":
+        return _execute_browser(
+            db,
+            settings,
+            plan,
+            source=browser_source,
+            skip_transcribe=skip_transcribe,
+            skip_llm=skip_llm,
+            chat_client=chat_client,
+            conservar_imagenes=conservar_imagenes,
+            ocr=ocr,
+            image_downloader=image_downloader,
         )
     if plan.effective == "instaloader":
         return _execute_instaloader(
@@ -295,14 +325,18 @@ def _execute_instaloader(
         warnings = getattr(source, "warnings", [])
         if warnings:
             notes.append(" ".join(warnings))
-        if skip_transcribe:
-            notes.append("Transcripción omitida.")
-        else:
-            notes.append(transcribe_pending(db, settings))
-        if skip_llm:
-            notes.append("Análisis omitido.")
-        else:
-            notes.append(analyze_pending(db, settings, chat_client=chat_client))
+        notes.extend(
+            _pasos_posteriores(
+                db,
+                settings,
+                skip_transcribe=skip_transcribe,
+                skip_llm=skip_llm,
+                chat_client=chat_client,
+                conservar_imagenes=False,
+                ocr=None,
+                image_downloader=None,
+            )
+        )
         message = " ".join(notes)
         db.finish_run(run_id, status="succeeded", reels_saved=saved, message=message)
         return RunOutcome(
@@ -322,6 +356,194 @@ def _execute_instaloader(
             source.close()
 
 
+def _execute_browser(
+    db: Database,
+    settings: Settings,
+    plan: SourcePlan,
+    *,
+    source: PlaywrightSource | None,
+    skip_transcribe: bool,
+    skip_llm: bool,
+    chat_client: ChatClient | None,
+    conservar_imagenes: bool,
+    ocr,
+    image_downloader,
+    note: str = "",
+) -> RunOutcome:
+    owns = False
+    if source is None:
+        if not settings.browser_ready:
+            message = str(BrowserNotConfigured())
+            if note:
+                message = f"{note} {message}"
+            raise BrowserNotConfigured(message)
+        source = PlaywrightSource(
+            settings.browser_profile,
+            max_accounts=settings.browser_max_accounts,
+            max_posts=settings.browser_max_posts,
+            account_delay=settings.browser_pause_account,
+            post_delay=settings.browser_pause_post,
+        )
+        owns = True
+    run_id = db.create_run(reels_requested=plan.estimate.reels_total, estimated_usd="0.00")
+    try:
+        try:
+            items = source.fetch_reels(plan.usernames, plan.estimate.reels_per_account)
+        except BrowserBlocked as exc:
+            saved = _save_parsed(db, exc.partial, run_id=run_id, settings=settings)
+            message = " ".join(
+                part for part in (note, f"Guardados {saved} posts antes de parar.", str(exc)) if part
+            )
+            db.finish_run(run_id, status="failed", reels_saved=saved, message=message)
+            return RunOutcome(
+                launched=True,
+                estimate=plan.estimate,
+                run_id=run_id,
+                reels_saved=saved,
+                status="failed",
+                message=message,
+                source="playwright",
+            )
+        saved = _save_parsed(db, items, run_id=run_id, settings=settings)
+        notes = [part for part in (note, f"Fuente playwright. Guardados {saved} posts.") if part]
+        skipped = plan.skipped or getattr(source, "skipped", [])
+        if skipped:
+            notes.append(f"Cuentas fuera de esta tanda: {', '.join(skipped)}.")
+        warnings = getattr(source, "warnings", [])
+        if warnings:
+            notes.append(" ".join(warnings))
+        notes.extend(
+            _pasos_posteriores(
+                db,
+                settings,
+                skip_transcribe=skip_transcribe,
+                skip_llm=skip_llm,
+                chat_client=chat_client,
+                conservar_imagenes=conservar_imagenes,
+                ocr=ocr,
+                image_downloader=image_downloader,
+            )
+        )
+        message = " ".join(notes)
+        db.finish_run(run_id, status="succeeded", reels_saved=saved, message=message)
+        return RunOutcome(
+            launched=True,
+            estimate=plan.estimate,
+            run_id=run_id,
+            reels_saved=saved,
+            status="succeeded",
+            message=message,
+            source="playwright",
+        )
+    except Exception as exc:
+        db.finish_run(run_id, status="failed", reels_saved=0, message=str(exc))
+        raise
+    finally:
+        if owns:
+            source.close()
+
+
+def _pasos_posteriores(
+    db: Database,
+    settings: Settings,
+    *,
+    skip_transcribe: bool,
+    skip_llm: bool,
+    chat_client: ChatClient | None,
+    conservar_imagenes: bool,
+    ocr,
+    image_downloader,
+) -> list[str]:
+    notes: list[str] = []
+    if skip_transcribe:
+        notes.append("Transcripción omitida.")
+    else:
+        notes.append(
+            preparar_carruseles(
+                db,
+                settings,
+                conservar=conservar_imagenes,
+                ocr=ocr,
+                downloader=image_downloader,
+            )
+        )
+        notes.append(transcribe_pending(db, settings))
+    if skip_llm:
+        notes.append("Análisis omitido.")
+    else:
+        notes.append(analyze_pending(db, settings, chat_client=chat_client))
+    return notes
+
+
+def preparar_carruseles(
+    db: Database,
+    settings: Settings,
+    *,
+    conservar: bool = False,
+    ocr=None,
+    downloader=None,
+) -> str:
+    rows = db.carruseles_sin_transcripcion()
+    if not rows:
+        return "No hay carruseles pendientes de texto."
+    motor = ocr or leer_imagen
+    bajar = downloader or _bajar_imagen
+    hechos = 0
+    avisos = 0
+    with tempfile.TemporaryDirectory(prefix="radar-slides-") as folder:
+        raiz = Path(folder)
+        for row in rows:
+            slides = json.loads(row["slides_json"] or "[]")
+            if not isinstance(slides, list):
+                slides = []
+            trabajo = raiz / str(row["id"])
+            try:
+                nuevos, conservados = completar_diapositivas(
+                    slides,
+                    ocr=motor,
+                    downloader=bajar,
+                    workdir=trabajo,
+                    conservar=conservar,
+                )
+            except OcrNotInstalled as exc:
+                db.set_transcript_error(row["id"], str(exc))
+                avisos += 1
+                continue
+            if conservar and conservados:
+                destino = settings.db_path.parent / "slides" / str(row["id"])
+                destino.mkdir(parents=True, exist_ok=True)
+                for path in conservados:
+                    (destino / path.name).write_bytes(path.read_bytes())
+            db.update_slides(row["id"], nuevos)
+            unidos = texto_unido(nuevos)
+            if not unidos:
+                db.set_transcript_error(
+                    row["id"],
+                    "El carrusel no trae texto y el OCR no leyó nada. No se inventa el gancho.",
+                )
+                avisos += 1
+                continue
+            primero = next((slide.get("texto") or "" for slide in nuevos if slide.get("texto")), "")
+            db.save_transcript(
+                row["id"],
+                text=unidos,
+                language=settings.whisper_language,
+                hook_text=first_sentence(str(primero)) or str(primero),
+                segments=[],
+                model="diapositivas",
+            )
+            hechos += 1
+    if avisos and hechos == 0:
+        return f"Ningún carrusel pudo leerse ({avisos})."
+    return f"Carruseles con texto: {hechos}."
+
+
+def _bajar_imagen(url: str, workdir: Path, indice: int) -> Path | None:
+    from radar.carrusel import descargar_imagen
+
+    return descargar_imagen(url, workdir, indice)
+
+
 def _save_parsed(db: Database, items: list, *, run_id: int, settings: Settings) -> int:
     from radar.apify_parse import parse_payload
 
@@ -338,6 +560,36 @@ def _instaloader_message(note: str, saved: int, source: InstaloaderSource, *, ex
 
 
 def describe_plan(plan: SourcePlan) -> str:
+    if plan.effective == "playwright":
+        lines = [
+            "Estimación antes de lanzar (no es un cargo):",
+            "  Fuente: playwright",
+            f"  Motivo: {plan.reason}",
+            f"  Cuentas en esta tanda: {plan.estimate.accounts}",
+            f"  Posts por cuenta: {plan.estimate.reels_per_account}",
+            f"  Resultados previstos: {plan.estimate.reels_total}",
+            "  Coste estimado de esta tanda: 0,00 USD",
+            "  El navegador no usa el crédito de Apify.",
+        ]
+        if plan.skipped:
+            names = ", ".join(f"@{name}" for name in plan.skipped)
+            lines.append(
+                f"  Fuera de esta tanda (máximo {plan.max_accounts}, orden alfabético): {names}"
+            )
+        lines.append(
+            "  Ritmo: pausas al azar entre perfiles y entre páginas. "
+            "Si Instagram responde 401, 429, checkpoint o challenge, la tanda se para y no se reintenta."
+        )
+        lines.append(
+            "  Aviso: el scraping con sesión va contra las condiciones de Instagram "
+            "y puede llevar al bloqueo de la cuenta secundaria."
+        )
+        lines.append(
+            "  Referencia si fuera Apify: "
+            f"{format_usd(plan.apify_estimate.estimated_usd)} "
+            f"({format_usd(plan.apify_estimate.usd_per_1000)} / 1.000)."
+        )
+        return "\n".join(lines)
     if plan.effective == "instaloader":
         lines = [
             "Estimación antes de lanzar (no es un cargo):",
@@ -385,7 +637,8 @@ def ingest_reels(
         saved += 1
     sample_size = settings.sample_size if settings else 20
     threshold = settings.outlier_multiple if settings else 2.0
-    db.recompute_outliers(sample_size=sample_size, threshold=threshold)
+    weight = settings.comment_weight if settings else 4.0
+    db.recompute_outliers(sample_size=sample_size, threshold=threshold, comment_weight=weight)
     return saved
 
 
@@ -474,6 +727,7 @@ def analyze_pending(
                     account=row["account"],
                     caption=row["caption"] or "",
                     transcript=row["transcript_text"] or "",
+                    perfil=db.get_perfil(),
                 )
             except (CodexRateLimit, CodexNotInstalled, CodexNotLoggedIn) as exc:
                 pending = (

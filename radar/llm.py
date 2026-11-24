@@ -77,12 +77,24 @@ class ChatClient(Protocol):
     def complete(self, system: str, user: str) -> str: ...
 
 
-def build_prompt(*, account: str, caption: str, transcript: str) -> tuple[str, str]:
+def build_prompt(*, account: str, caption: str, transcript: str, perfil=None) -> tuple[str, str]:
     user = (
         _USER_TEMPLATE.replace("<<ACCOUNT>>", account or "desconocida")
         .replace("<<CAPTION>>", (caption or "").strip() or "(sin pie)")
         .replace("<<TRANSCRIPT>>", (transcript or "").strip() or "(sin transcripción)")
     )
+    if perfil is not None:
+        user += (
+            "\nPerfil de Antonio (si un campo es [X], no lo completes):\n"
+            f"Oferta: {perfil.hueco('oferta')}\n"
+            f"Audiencia: {perfil.hueco('audiencia')}\n"
+            f"Problema: {perfil.hueco('problema')}\n"
+            f"CTA: {perfil.hueco('cta')}\n"
+            f"Nicho: {perfil.hueco('nicho')}\n"
+            f"Tono: {perfil.hueco('tono')}\n"
+            f"Pruebas que sí se pueden citar: {perfil.hueco('pruebas')}\n"
+            f"Restricciones: {perfil.hueco('restricciones')}\n"
+        )
     return _SYSTEM, user
 
 
@@ -112,8 +124,9 @@ def analyze_with_client(
     account: str,
     caption: str,
     transcript: str,
+    perfil=None,
 ) -> AnalysisDraft:
-    system, user = build_prompt(account=account, caption=caption, transcript=transcript)
+    system, user = build_prompt(account=account, caption=caption, transcript=transcript, perfil=perfil)
     try:
         raw = client.complete(system, user)
     except LLMError:

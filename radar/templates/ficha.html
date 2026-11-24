@@ -17,12 +17,21 @@
   </header>
 
   <dl class="metrics">
+    {% if entry.media_kind == "carrusel" %}
+    <div><dt>Interacción</dt><dd>{{ entry.engagement_score|es_int }}</dd></div>
+    <div><dt>Mediana</dt><dd>{{ entry.median_plays|es_int }}</dd></div>
+    {% else %}
     <div><dt>Reproducciones</dt><dd>{{ entry.play_count|es_int }}</dd></div>
     <div><dt>Mediana</dt><dd>{{ entry.median_plays|es_int }}</dd></div>
+    {% endif %}
     <div><dt>Me gusta</dt><dd>{{ entry.likes_count|es_int }}</dd></div>
     <div><dt>Comentarios</dt><dd>{{ entry.comments_count|es_int }}</dd></div>
   </dl>
+  {% if entry.media_kind == "carrusel" %}
+  <p class="fine">Interacción = me gusta + {{ entry.comment_weight or 4 }} × comentarios, contra la mediana de los últimos carruseles con ambas cifras. El peso es una regla de esta app, no una métrica de Instagram. No hay reproducciones.</p>
+  {% else %}
   <p class="fine">Mediana de {{ entry.sample_size or "—" }} reels con cifra (máximo los 20 más recientes). Se usa videoPlayCount, no las visualizaciones.</p>
+  {% endif %}
 
   <p class="origin">
     {% if entry.is_example %}
@@ -31,6 +40,69 @@
     <a href="{{ entry.url }}" target="_blank" rel="noreferrer">Abrir el reel original</a>
     {% endif %}
   </p>
+
+  <section>
+    <h2>Desglose</h2>
+    <p class="fine">{{ dossier.desglose_nota }}</p>
+    {% if dossier.desglose %}
+    <ol class="steps">
+      {% for linea in dossier.desglose %}
+      <li><p>{{ linea }}</p></li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Gancho</h2>
+    <p class="prose">{{ dossier.gancho|gaps }}</p>
+  </section>
+
+  <section>
+    <h2>Receta</h2>
+    <ol class="steps">
+      {% for linea in dossier.receta %}
+      <li><p>{{ linea|gaps }}</p></li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <section>
+    <h2>Prompts</h2>
+    <ol class="steps">
+      {% for linea in dossier.prompts %}
+      <li><p>{{ linea|gaps }}</p></li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <section>
+    <h2>Ajustes de edición</h2>
+    <ul class="steps">
+      {% for linea in dossier.ajustes %}
+      <li><p>{{ linea|gaps }}</p></li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section>
+    <h2>Ideas derivadas</h2>
+    <ul class="steps">
+      {% for linea in dossier.ideas %}
+      <li><p>{{ linea|gaps }}</p></li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section>
+    <h2>Monetización</h2>
+    <p class="prose">{{ dossier.monetizacion|gaps }}</p>
+  </section>
+
+  <section>
+    <h2>Adaptación</h2>
+    <p class="prose">{{ dossier.adaptacion|gaps }}</p>
+  </section>
 
   <section>
     <h2>Transcripción</h2>

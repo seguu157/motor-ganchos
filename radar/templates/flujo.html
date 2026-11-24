@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">Producción</p>
+  <h1>Oferta, gancho y guion</h1>
+  <p class="lede">El recorrido es oferta, referencias, hooks, guion, variantes, revisión y exportación. Solo vale un outlier con métricas guardadas. Los ejemplos se rechazan.</p>
+</section>
+
+{% if error %}
+<p class="warn" role="alert">{{ error }}</p>
+{% endif %}
+
+<form class="launch" method="post" action="/flujo">
+  <label>Título del proyecto
+    <input name="titulo" required>
+  </label>
+  <button type="submit">Empezar</button>
+</form>
+
+{% if proyectos %}
+<ul class="account-list">
+  {% for proyecto in proyectos %}
+  <li>
+    <div>
+      <strong><a href="/flujo/{{ proyecto.id }}">{{ proyecto.titulo }}</a></strong>
+      <p class="muted">{{ etiquetas[proyecto.paso] }} · {{ proyecto.estado }}</p>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty">Todavía no hay proyectos.</p>
+{% endif %}
+{% endblock %}
