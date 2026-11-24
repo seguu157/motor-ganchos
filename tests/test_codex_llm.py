@@ -1,4 +1,5 @@
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,8 @@ from radar.llm_codex import (
     CodexNotInstalled,
     CodexNotLoggedIn,
     CodexRateLimit,
+    _default_runner,
+    argv_ejecutable,
     build_exec_command,
     check_backend,
 )
@@ -193,6 +196,50 @@ def test_limite_de_uso_en_codex_no_reintenta(tmp_path, monkeypatch):
     with pytest.raises(CodexRateLimit):
         check_backend(settings)
     assert calls["exec"] == 1
+
+
+def test_en_windows_un_cmd_se_lanza_con_cmd_exe(monkeypatch, tmp_path):
+    monkeypatch.setattr("radar.llm_codex.os.name", "nt")
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+    cmd = tmp_path / "codex.CMD"
+    cmd.write_text("@echo off\r\n", encoding="utf-8")
+    vistos: list[str] = []
+
+    def which(nombre: str) -> str:
+        vistos.append(nombre)
+        return str(cmd)
+
+    monkeypatch.setattr("radar.llm_codex.shutil.which", which)
+    argv = argv_ejecutable(["mi-codex", "exec", "--json", "-"])
+    assert vistos == ["mi-codex"]
+    assert argv[0] == r"C:\Windows\System32\cmd.exe"
+    assert argv[1:4] == ["/d", "/s", "/c"]
+    orden = argv[4]
+    assert "codex.CMD" in orden
+    assert "exec" in orden
+    assert orden.rstrip().endswith("-")
+
+    exe = tmp_path / "codex.exe"
+    exe.write_bytes(b"")
+    monkeypatch.setattr("radar.llm_codex.shutil.which", lambda _nombre: str(exe))
+    directo = argv_ejecutable(["codex", "login", "status"])
+    assert directo == [str(exe), "login", "status"]
+
+
+def test_el_stdin_de_codex_sale_en_utf8_aunque_el_sistema_use_cp1252(monkeypatch, tmp_path):
+    import locale
+
+    monkeypatch.setattr(locale, "getpreferredencoding", lambda _do_setlocale=True: "cp1252")
+    destino = tmp_path / "recibido.bin"
+    codigo = "import sys; open(sys.argv[1], 'wb').write(sys.stdin.buffer.read())"
+    texto = "cañón — ¿sigues con la ñ?"
+    resultado = _default_runner(
+        [sys.executable, "-c", codigo, str(destino)],
+        input_text=texto,
+        timeout=30,
+    )
+    assert resultado.returncode == 0
+    assert destino.read_bytes() == texto.encode("utf-8")
 
 
 def test_con_clave_de_api_no_se_elige_codex(tmp_path, monkeypatch):

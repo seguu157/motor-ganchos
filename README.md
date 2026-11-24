@@ -39,6 +39,8 @@ Abre http://127.0.0.1:8000 . La primera vez, si la base está vacía, carga sola
 
 El OCR es `rapidocr-onnxruntime` (el extra `ocr`). No hace falta instalar Tesseract. Si no lo instalas, los carruseles que ya traen texto se leen igual; los que solo tienen imagen quedan con un aviso y sin gancho inventado.
 
+Codex en este sistema: `npm install -g @openai/codex` deja `codex.cmd`, no un `.exe`. Radar lo busca en el PATH (o en `RADAR_CODEX_BIN`, si lo cambias) y le manda el prompt en UTF-8. No hace falta definir `PYTHONUTF8`.
+
 Whisper va aparte, porque el modelo pesa:
 
 ```powershell
