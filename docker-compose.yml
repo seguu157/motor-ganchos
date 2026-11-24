@@ -12,9 +12,12 @@ services:
       HF_HOME: /data/huggingface
       IG_SESSION_FILE: /data/ig.session
       RADAR_SOURCE: auto
+      CODEX_HOME: /root/.codex
     volumes:
       - radar-data:/data
+      - codex-auth:/root/.codex
     restart: unless-stopped
 
 volumes:
   radar-data:
+  codex-auth:

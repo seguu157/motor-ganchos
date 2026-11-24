@@ -44,6 +44,10 @@ class Settings:
     ig_username: str | None
     ig_session_file: Path
     ig_max_accounts: int
+    codex_model: str | None
+    codex_bin: str
+    codex_timeout: float
+    llm_call_delay: float
 
     @property
     def llm_api_key(self) -> str | None:
@@ -55,6 +59,10 @@ class Settings:
 
     @property
     def llm_ready(self) -> bool:
+        if self.llm_provider == "codex":
+            return True
+        if self.llm_provider == "none":
+            return False
         return self.llm_provider in {"openai", "anthropic"} and bool(self.llm_api_key) and bool(self.llm_model)
 
     @property
@@ -90,6 +98,10 @@ def load_settings() -> Settings:
         ig_username=_blank(os.environ.get("IG_USERNAME")),
         ig_session_file=Path(os.environ.get("IG_SESSION_FILE", "data/ig.session")),
         ig_max_accounts=_int("RADAR_IG_MAX_ACCOUNTS", 10, minimum=1),
+        codex_model=_blank(os.environ.get("RADAR_CODEX_MODEL")),
+        codex_bin=os.environ.get("RADAR_CODEX_BIN", "codex"),
+        codex_timeout=_float("RADAR_CODEX_TIMEOUT", 180),
+        llm_call_delay=_float("RADAR_LLM_DELAY_SECONDS", 2),
     )
 
 
@@ -101,17 +113,17 @@ def _source_mode() -> str:
 
 
 def _provider() -> str:
-    explicit = _blank(os.environ.get("LLM_PROVIDER"))
+    explicit = _blank(os.environ.get("RADAR_LLM")) or _blank(os.environ.get("LLM_PROVIDER"))
     if explicit:
         name = explicit.lower()
-        if name not in {"openai", "anthropic", "none"}:
-            raise ValueError("LLM_PROVIDER tiene que ser openai, anthropic o none.")
+        if name not in {"codex", "openai", "anthropic", "none"}:
+            raise ValueError("RADAR_LLM tiene que ser codex, openai, anthropic o none.")
         return name
     if _blank(os.environ.get("OPENAI_API_KEY")):
         return "openai"
     if _blank(os.environ.get("ANTHROPIC_API_KEY")):
         return "anthropic"
-    return "none"
+    return "codex"
 
 
 def _blank(value: str | None) -> str | None:

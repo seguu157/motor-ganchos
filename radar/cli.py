@@ -66,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     import_cmd.add_argument("path")
 
     sub.add_parser("seed", help="Carga la watchlist y los reels de ejemplo")
+    sub.add_parser("llm-check", help="Comprueba el backend de lenguaje con un prompt mínimo")
 
     accounts = sub.add_parser("accounts", help="Watchlist de cuentas")
     account_sub = accounts.add_subparsers(dest="account_command", required=True)
@@ -100,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
             seed_examples(db)
             print("Watchlist y reels de ejemplo cargados. Las cifras no son reales.")
             return 0
+        if args.command == "llm-check":
+            return _llm_check(settings)
         if args.command == "accounts":
             return _accounts(db, args)
     except (
@@ -155,6 +158,18 @@ def _run(db: Database, settings, args) -> int:
     )
     print(outcome.message)
     return 0 if outcome.status == "succeeded" else 2
+
+
+def _llm_check(settings) -> int:
+    from radar.llm import LLMError
+    from radar.llm_codex import check_backend
+
+    try:
+        print(check_backend(settings))
+    except LLMError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    return 0
 
 
 def _ig_login(settings, username_arg: str | None) -> int:

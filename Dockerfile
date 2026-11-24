@@ -5,10 +5,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     RADAR_DB=/data/radar.sqlite \
     RADAR_HOST=0.0.0.0 \
     RADAR_PORT=8000 \
-    HF_HOME=/data/huggingface
+    HF_HOME=/data/huggingface \
+    CODEX_HOME=/root/.codex
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @openai/codex \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -21,9 +25,9 @@ COPY radar ./radar
 ARG INSTALL_WHISPER=0
 RUN pip install --no-cache-dir . \
     && if [ "$INSTALL_WHISPER" = "1" ]; then pip install --no-cache-dir -r requirements-whisper.txt; fi \
-    && mkdir -p /data
+    && mkdir -p /data /root/.codex
 
-VOLUME ["/data"]
+VOLUME ["/data", "/root/.codex"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

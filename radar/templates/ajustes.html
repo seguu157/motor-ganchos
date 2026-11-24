@@ -33,7 +33,13 @@
   </div>
   <div>
     <dt>LLM</dt>
-    <dd>{{ settings.llm_provider }}{% if settings.llm_model %} · {{ settings.llm_model }}{% endif %} · {{ "listo" if llm_listo else "no listo" }}</dd>
+    <dd>
+      {% if settings.llm_provider == "codex" %}
+      codex · suscripción ChatGPT{% if settings.codex_model %} · {{ settings.codex_model }}{% endif %} · comprueba con radar llm-check
+      {% else %}
+      {{ settings.llm_provider }}{% if settings.llm_model %} · {{ settings.llm_model }}{% endif %} · {{ "listo" if llm_listo else "no listo" }}
+      {% endif %}
+    </dd>
   </div>
   <div>
     <dt>Base de datos</dt>

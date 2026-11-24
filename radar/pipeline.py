@@ -7,6 +7,7 @@ Sin `APIFY_TOKEN` tampoco. Los tests pasan un cliente falso y no abren la red.
 from __future__ import annotations
 
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from radar.cost import CostEstimate, estimate_cost
 from radar.db import Database
 from radar.format_es import format_usd
 from radar.llm import AnalysisDraft, ChatClient, LLMError, analyze_with_client
+from radar.llm_codex import CodexNotInstalled, CodexNotLoggedIn, CodexRateLimit
 from radar.sources.instaloader_source import (
     InstagramBlocked,
     InstagramNotConfigured,
@@ -433,13 +435,25 @@ def transcribe_pending(db: Database, settings: Settings) -> str:
     return f"Transcritos {done} outliers."
 
 
-def analyze_pending(db: Database, settings: Settings, *, chat_client: ChatClient | None = None) -> str:
+def analyze_pending(
+    db: Database,
+    settings: Settings,
+    *,
+    chat_client: ChatClient | None = None,
+    sleeper=None,
+) -> str:
+    """Una llamada cada vez. Con Codex hay una pausa entre reels.
+
+    Si el plan de ChatGPT llega al límite, se guardan los ya analizados y el
+    resto sigue pendiente: no hay fila de análisis, así que la próxima tanda
+    los retoma. No se reintenta el que chocó con el límite.
+    """
     rows = db.outliers_missing_analysis()
     if not rows:
         return "No hay outliers pendientes de analizar."
     if settings.llm_provider == "none":
         return "LLM no configurado: se omite el análisis."
-    if not settings.llm_ready and chat_client is None:
+    if settings.llm_provider in {"openai", "anthropic"} and not settings.llm_ready and chat_client is None:
         return "Falta LLM_MODEL o la clave del proveedor: se omite el análisis."
 
     owns = False
@@ -447,9 +461,13 @@ def analyze_pending(db: Database, settings: Settings, *, chat_client: ChatClient
     if client is None:
         client = _build_chat_client(settings)
         owns = True
+    pause = sleeper or time.sleep
+    delay = max(0.0, settings.llm_call_delay) if settings.llm_provider == "codex" else 0
     done = 0
     try:
-        for row in rows:
+        for index, row in enumerate(rows):
+            if index and delay > 0:
+                pause(delay)
             try:
                 draft: AnalysisDraft = analyze_with_client(
                     client,
@@ -457,6 +475,15 @@ def analyze_pending(db: Database, settings: Settings, *, chat_client: ChatClient
                     caption=row["caption"] or "",
                     transcript=row["transcript_text"] or "",
                 )
+            except (CodexRateLimit, CodexNotInstalled, CodexNotLoggedIn) as exc:
+                pending = (
+                    "Pendiente para la próxima tanda: límite de uso de ChatGPT."
+                    if isinstance(exc, CodexRateLimit)
+                    else str(exc)
+                )
+                for leftover in rows[index:]:
+                    db.set_analysis_error(leftover["id"], pending)
+                return f"Analizados {done}. {exc}"
             except LLMError as exc:
                 db.set_analysis_error(row["id"], str(exc))
                 continue
@@ -468,7 +495,7 @@ def analyze_pending(db: Database, settings: Settings, *, chat_client: ChatClient
                 adapted_script=draft.adapted_script,
                 warnings=draft.warnings,
                 provider=settings.llm_provider,
-                model=settings.llm_model,
+                model=settings.llm_model or settings.codex_model,
                 raw=draft.raw,
             )
             done += 1
@@ -497,14 +524,6 @@ def describe_estimate(estimate: CostEstimate) -> str:
 
 
 def _build_chat_client(settings: Settings) -> ChatClient:
-    if settings.llm_provider == "anthropic":
-        from radar.llm import AnthropicClient
+    from radar.llm_codex import client_for_settings
 
-        return AnthropicClient(api_key=settings.anthropic_api_key or "", model=settings.llm_model or "")
-    from radar.llm import OpenAICompatibleClient
-
-    return OpenAICompatibleClient(
-        api_key=settings.openai_api_key or "",
-        base_url=settings.openai_base_url,
-        model=settings.llm_model or "",
-    )
+    return client_for_settings(settings)

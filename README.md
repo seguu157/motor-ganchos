@@ -67,11 +67,13 @@ No hace falta token. Los tests no llaman a Apify.
 | `WHISPER_DEVICE` | Por defecto `cpu`. |
 | `WHISPER_COMPUTE_TYPE` | Por defecto `int8`, para un VPS de unos 2 GB. |
 | `WHISPER_LANGUAGE` | Por defecto `es`. |
-| `LLM_PROVIDER` | `openai`, `anthropic` o `none`. |
-| `LLM_MODEL` | Nombre del modelo. Sin esto no hay análisis. |
-| `OPENAI_API_KEY` | Clave para una API compatible con OpenAI (también xAI u OpenRouter, cambiando la base). |
+| `RADAR_LLM` | `codex` (por defecto si no hay clave), `openai`, `anthropic` o `none`. `LLM_PROVIDER` sigue valiendo como alias. |
+| `RADAR_CODEX_MODEL` | Modelo opcional de Codex. Si falta, usa el de la sesión. |
+| `RADAR_LLM_DELAY_SECONDS` | Pausa entre reels con Codex. Por defecto 2. |
+| `LLM_MODEL` | Obligatorio solo con `openai` o `anthropic`. |
+| `OPENAI_API_KEY` | Clave de API, solo si no quieres la suscripción de ChatGPT. |
 | `OPENAI_BASE_URL` | Por defecto `https://api.openai.com/v1`. |
-| `ANTHROPIC_API_KEY` | Solo si `LLM_PROVIDER=anthropic`. |
+| `ANTHROPIC_API_KEY` | Solo si `RADAR_LLM=anthropic`. |
 | `TUBEALFRED_API_KEY` | Reservada. No activa nada. Ver más abajo. |
 | `RADAR_SOURCE` | `auto` (por defecto), `apify` o `instaloader`. |
 | `IG_USERNAME` | Cuenta secundaria para Instaloader. No es la cuenta que miras. |
@@ -81,7 +83,7 @@ No hace falta token. Los tests no llaman a Apify.
 
 Copia `.env.example`. Los secretos no se guardan en la base y la pantalla de Ajustes solo dice si están definidos.
 
-Para un modelo compatible con la API de OpenAI (por ejemplo xAI) basta con `LLM_PROVIDER=openai`, `OPENAI_BASE_URL` y `LLM_MODEL`. El nombre del modelo lo pones tú según la documentación vigente: este repo no fija uno.
+Sin `OPENAI_API_KEY` ni `ANTHROPIC_API_KEY`, el análisis usa Codex y la suscripción de ChatGPT. Para volver a una API de pago, mira la sección siguiente.
 
 ## Coste estimado
 
@@ -153,11 +155,41 @@ Si no está instalado, la ingesta de metadatos se guarda igual y la ficha explic
 
 En un VPS de unos 2 GB no lances el modelo dentro del mismo proceso que atiende la web. Usa un contenedor aparte para el cron (más abajo).
 
-## LLM
+## LLM con la suscripción de ChatGPT
 
 El prompt obliga a no inventar cifras, porcentajes, dinero, fechas ni resultados, y a escribir `[X]` donde Antonio tenga que poner algo suyo. Después, el código compara los números del guion y de la plantilla con la transcripción y el pie. Si aparece una cifra que no estaba, la ficha muestra un aviso. No se borra sola: la tienes que revisar.
 
-Sin proveedor, sin clave o sin `LLM_MODEL`, ese paso se omite.
+Por defecto el backend es **Codex CLI** (`@openai/codex`). El uso cuenta contra el plan ChatGPT Plus o Pro, no contra una clave de API. Las llamadas van de una en una, con una pausa (`RADAR_LLM_DELAY_SECONDS`, 2 segundos). Si Codex responde límite de uso, la tanda se para: lo ya analizado se queda guardado y el resto sigue pendiente para la próxima ejecución. No se reintenta ese reel en la misma tanda. Si el JSON no vale, se pide una sola vez más.
+
+Instalación en el ordenador:
+
+```bash
+npm install -g @openai/codex
+codex login
+radar llm-check
+```
+
+En un VPS, el contenedor ya trae Node y Codex. La sesión vive en el volumen `codex-auth` (`/root/.codex`):
+
+```bash
+docker compose run --rm -it radar codex login --device-auth
+docker compose run --rm radar radar llm-check
+```
+
+`codex login` abre el navegador. `--device-auth` muestra un código para entrar desde otro dispositivo. `radar llm-check` manda un prompt mínimo y comprueba que la respuesta es el JSON del análisis.
+
+El comando que se lanza es `codex exec`, con `--skip-git-repo-check`, `--sandbox read-only`, `--json` y `--output-last-message`. El prompt entra por stdin (`-`). `RADAR_CODEX_MODEL` añade `--model` si quieres fijar uno; si no, vale el de la sesión.
+
+Para volver a una clave de API:
+
+```bash
+# .env
+RADAR_LLM=openai
+OPENAI_API_KEY=sk-...
+LLM_MODEL=el-modelo-vigente
+```
+
+`RADAR_LLM=anthropic` usa `ANTHROPIC_API_KEY`. `RADAR_LLM=none` no analiza. `LLM_PROVIDER` sigue funcionando como alias de `RADAR_LLM`.
 
 ## Banco, Markdown y JSON
 
@@ -188,6 +220,7 @@ radar accounts list
 radar accounts add jordigpt
 radar accounts remove jordigpt
 radar ig-login
+radar llm-check
 radar run --dry-run
 radar run --yes
 radar run --source instaloader --yes
@@ -205,7 +238,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-La web queda en el puerto 8000. Sin token arranca igual y enseña los ejemplos.
+La web queda en el puerto 8000. Sin token de Apify arranca igual y enseña los ejemplos. La sesión de ChatGPT de Codex queda en el volumen `codex-auth`; el login está en la sección del LLM.
 
 Para transcribir en el VPS, construye la imagen con Whisper:
 
