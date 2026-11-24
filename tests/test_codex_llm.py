@@ -22,6 +22,16 @@ from tests.conftest import make_settings
 VALID = '{"hook_type":"otro","template":"[X]","adapted_script":"[X]"}'
 
 
+@pytest.fixture(autouse=True)
+def _sin_codex_instalado(monkeypatch):
+    """La resolución no puede ver el codex.CMD real de la máquina.
+
+    Cada test que quiera simular un binario concreto sustituye `shutil.which`.
+    """
+
+    monkeypatch.setattr("radar.llm_codex.shutil.which", lambda _nombre: None)
+
+
 def _result(code=0, stdout="", stderr=""):
     return SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr)
 
@@ -198,10 +208,69 @@ def test_limite_de_uso_en_codex_no_reintenta(tmp_path, monkeypatch):
     assert calls["exec"] == 1
 
 
-def test_en_windows_un_cmd_se_lanza_con_cmd_exe(monkeypatch, tmp_path):
-    monkeypatch.setattr("radar.llm_codex.os.name", "nt")
-    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
-    cmd = tmp_path / "codex.CMD"
+def _partir_argv_windows(texto: str) -> list[str]:
+    """Parser mínimo de CommandLineToArgvW, para comprobar la línea de cmd.exe."""
+    args: list[str] = []
+    i = 0
+    n = len(texto)
+    while i < n:
+        while i < n and texto[i] == " ":
+            i += 1
+        if i >= n:
+            break
+        buf: list[str] = []
+        entre_comillas = False
+        while i < n:
+            caracter = texto[i]
+            if caracter == "\\":
+                barras = 0
+                while i < n and texto[i] == "\\":
+                    barras += 1
+                    i += 1
+                if i < n and texto[i] == '"':
+                    buf.append("\\" * (barras // 2))
+                    if barras % 2 == 0:
+                        entre_comillas = not entre_comillas
+                    else:
+                        buf.append('"')
+                    i += 1
+                else:
+                    buf.append("\\" * barras)
+                continue
+            if caracter == '"':
+                entre_comillas = not entre_comillas
+                i += 1
+                continue
+            if caracter == " " and not entre_comillas:
+                break
+            buf.append(caracter)
+            i += 1
+        args.append("".join(buf).replace("%%", "%"))
+    return args
+
+
+def _argumentos_que_recibe_codex(orden: list[str] | str) -> list[str]:
+    """Deshace el wrapper y devuelve el argv que acaba en codex."""
+    if isinstance(orden, list):
+        if len(orden) >= 4 and orden[1:3] == ["/d", "/c"]:
+            return list(orden[3:])
+        return list(orden)
+    marca = " /d /s /c "
+    indice = orden.find(marca)
+    assert indice > 0, orden
+    resto = orden[indice + len(marca) :]
+    if resto.startswith('"') and resto.endswith('"'):
+        resto = resto[1:-1]
+    return _partir_argv_windows(resto)
+
+
+def test_en_windows_un_cmd_se_lanza_con_argumentos_separados(monkeypatch, tmp_path):
+    from radar.llm_codex import invocacion_subprocess
+
+    monkeypatch.setattr("radar.llm_codex._es_windows", lambda: True)
+    monkeypatch.setenv("COMSPEC", r"C:\Program Files\cmd.exe")
+    cmd = tmp_path / "Program Files" / "npm" / "codex.CMD"
+    cmd.parent.mkdir(parents=True)
     cmd.write_text("@echo off\r\n", encoding="utf-8")
     vistos: list[str] = []
 
@@ -210,20 +279,81 @@ def test_en_windows_un_cmd_se_lanza_con_cmd_exe(monkeypatch, tmp_path):
         return str(cmd)
 
     monkeypatch.setattr("radar.llm_codex.shutil.which", which)
-    argv = argv_ejecutable(["mi-codex", "exec", "--json", "-"])
+    argv = argv_ejecutable(["mi-codex", "exec", "--model", 'modelo "ñ" & 100%', "-"])
     assert vistos == ["mi-codex"]
-    assert argv[0] == r"C:\Windows\System32\cmd.exe"
-    assert argv[1:4] == ["/d", "/s", "/c"]
-    orden = argv[4]
-    assert "codex.CMD" in orden
-    assert "exec" in orden
-    assert orden.rstrip().endswith("-")
+    assert argv[0] == r"C:\Program Files\cmd.exe"
+    assert argv[1:3] == ["/d", "/c"]
+    assert argv[3:] == [str(cmd), "exec", "--model", 'modelo "ñ" & 100%', "-"]
+    linea = invocacion_subprocess(argv)
+    assert isinstance(linea, str)
+    assert _argumentos_que_recibe_codex(linea) == [str(cmd), "exec", "--model", 'modelo "ñ" & 100%', "-"]
 
     exe = tmp_path / "codex.exe"
     exe.write_bytes(b"")
     monkeypatch.setattr("radar.llm_codex.shutil.which", lambda _nombre: str(exe))
     directo = argv_ejecutable(["codex", "login", "status"])
     assert directo == [str(exe), "login", "status"]
+    assert invocacion_subprocess(directo) == directo
+
+
+def test_el_limite_de_uso_no_se_confunde_con_la_sesion_ni_con_el_wrapper(monkeypatch, tmp_path):
+    from radar.llm_codex import invocacion_subprocess
+
+    settings = make_settings(monkeypatch, tmp_path, RADAR_CODEX_MODEL="modelo de prueba")
+    cmd = tmp_path / "Program Files" / "npm" / "codex.CMD"
+    cmd.parent.mkdir(parents=True)
+    cmd.write_text("@echo off\r\n", encoding="utf-8")
+
+    def preparar(windows: bool):
+        llamadas: list[list[str]] = []
+
+        def which(nombre: str) -> str | None:
+            if windows and nombre == "codex":
+                return str(cmd)
+            return None
+
+        monkeypatch.setattr("radar.llm_codex.shutil.which", which)
+        monkeypatch.setattr("radar.llm_codex._es_windows", lambda: windows)
+        if windows:
+            monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+
+        def fake_run(orden, input=None, capture_output=None, text=None, timeout=None, check=None, **kwargs):
+            assert kwargs["encoding"] == "utf-8"
+            tokens = _argumentos_que_recibe_codex(orden)
+            llamadas.append(tokens)
+            if tokens[1:3] == ["login", "status"]:
+                return _result(0, "Logged in using ChatGPT\n")
+            assert tokens[-1] == "-"
+            assert tokens[tokens.index("--model") + 1] == "modelo de prueba"
+            return _result(1, "", "usage limit reached")
+
+        monkeypatch.setattr("radar.llm_codex.subprocess.run", fake_run)
+        return llamadas
+
+    sin_wrapper = preparar(False)
+    with pytest.raises(CodexRateLimit):
+        check_backend(settings)
+    assert sin_wrapper[0][1:3] == ["login", "status"]
+    assert sin_wrapper[1][1] == "exec"
+    assert sin_wrapper[1][-1] == "-"
+
+    con_wrapper = preparar(True)
+    with pytest.raises(CodexRateLimit):
+        check_backend(settings)
+    assert con_wrapper[0][0].endswith("codex.CMD")
+    assert con_wrapper[0][1:3] == ["login", "status"]
+    assert con_wrapper[1][con_wrapper[1].index("--model") + 1] == "modelo de prueba"
+    assert con_wrapper[1][-1] == "-"
+    assert isinstance(invocacion_subprocess(argv_ejecutable(["codex", "login", "status"])), str)
+
+    def sesion_caducada(orden, input=None, **kwargs):
+        tokens = _argumentos_que_recibe_codex(orden)
+        assert tokens[1:3] == ["login", "status"]
+        return _result(1, "", "Not logged in")
+
+    monkeypatch.setattr("radar.llm_codex.subprocess.run", sesion_caducada)
+    with pytest.raises(CodexNotLoggedIn):
+        check_backend(settings)
 
 
 def test_el_stdin_de_codex_sale_en_utf8_aunque_el_sistema_use_cp1252(monkeypatch, tmp_path):
