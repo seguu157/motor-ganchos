@@ -12,7 +12,7 @@ from radar.ganchos.agregar import rankings
 from radar.ganchos.analizar import analizar, parsear_analisis
 from radar.ganchos.exportar import exportar, render_csv, render_markdown
 from radar.ganchos.extraer import ejecutar
-from radar.ganchos.fotos import LecturaFoto, aplicar_ocr, documentos, imagenes_de_documento, leer_slideshow
+from radar.ganchos.fotos import LecturaFoto, aplicar_ocr, documentos, imagenes_de_documento, leer_slideshow, url_movil, url_oembed
 from radar.ganchos.ig import ReelCrudo, reel_desde_blobs
 from radar.ganchos.piezas import parsear_linea
 from radar.ganchos.programar import instalar_tarea, preparar_tarea
@@ -184,6 +184,62 @@ def test_la_ficha_movil_trae_las_diapositivas():
     assert lectura.origen == "movil"
 
 
+def test_la_miniatura_no_sustituye_al_slideshow_del_navegador():
+    import json
+
+    url = "https://www.tiktok.com/@a/photo/9"
+    oembed = json.dumps(
+        {
+            "title": "pie",
+            "author_name": "a",
+            "thumbnail_url": "https://p16.tiktokcdn.com/thumb.jpeg",
+        }
+    )
+    slides = {
+        "__DEFAULT_SCOPE__": {
+            "webapp.reflow.video.detail": {
+                "itemInfo": {
+                    "itemStruct": {
+                        "desc": "pie",
+                        "imagePost": {
+                            "images": [
+                                {"imageURL": {"urlList": ["https://p16.tiktokcdn.com/a.jpeg"]}},
+                                {"imageURL": {"urlList": ["https://p16.tiktokcdn.com/b.jpeg"]}},
+                            ]
+                        },
+                    }
+                }
+            }
+        }
+    }
+    html = (
+        '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">'
+        + json.dumps(slides)
+        + "</script>"
+    )
+    paginas = {
+        url_movil(url): Respuesta(404, "", url_movil(url)),
+        url: Respuesta(404, "", url),
+        "https://www.tiktok.com/embed/v2/9": Respuesta(404, "", "embed"),
+        url_oembed(url): Respuesta(200, oembed, "oembed"),
+    }
+    red = _Red(paginas)
+    lector = Lector(red, dormir=lambda _s: None, rng=__import__("random").Random(0))
+    abiertas: list[str] = []
+    lectura = leer_slideshow(
+        lector,
+        url,
+        pausa=(0, 0),
+        dormir=lambda _s: None,
+        rng=__import__("random").Random(0),
+        navegador=lambda direccion: abiertas.append(direccion) or html,
+    )
+    assert abiertas == [url]
+    assert lectura.origen == "navegador"
+    assert len(lectura.imagenes) == 2
+    assert "thumb.jpeg" not in lectura.imagenes[0]
+
+
 def test_sin_diapositivas_queda_en_error_y_se_reintenta(settings, tmp_path):
     db = fresh_db(tmp_path)
     guardar_tiktok(db, _cuenta_tiktok(piezas_virales="https://www.tiktok.com/@app.estudio/photo/alta | 80,000 vistas | 80.0×"))
@@ -284,6 +340,73 @@ def test_reintentar_vuelve_a_leer_una_pieza_con_texto(settings, tmp_path):
     )
     assert otra.leidas == 1
     assert llamadas == [url]
+
+
+def test_reintentar_borra_el_analisis_si_cambia_el_texto(settings, tmp_path):
+    from radar.ganchos.analizar import pendientes_de_analisis
+    from radar.ganchos.store import guardar_analisis, guardar_pieza
+
+    db = fresh_db(tmp_path)
+    url = "https://www.tiktok.com/@app.estudio/photo/alta"
+    guardar_tiktok(db, _cuenta_tiktok(piezas_virales=f"{url} | 80,000 vistas | 80.0×"))
+    pieza_id = guardar_pieza(
+        db,
+        {
+            "fuente": "tiktok",
+            "url": url,
+            "handle": "app.estudio",
+            "vistas": 80_000,
+            "multiplo": 80.0,
+            "caption": "pie",
+            "num_diapositivas": 1,
+            "diapositivas": [{"indice": 1, "texto": "viejo", "origen": "ocr"}],
+            "gancho_texto": "viejo",
+            "estado": "extraida",
+            "extraida_en": "2026-11-25T00:00:00+00:00",
+        },
+    )
+    guardar_analisis(
+        db,
+        pieza_id,
+        {
+            "hook": "viejo",
+            "hook_type": "lista",
+            "formato": "lista",
+            "plantilla": "[X]",
+            "adaptacion": "Sugerencia: [X]",
+        },
+    )
+    textos = {"actual": "viejo"}
+
+    def leer(_url: str) -> LecturaFoto:
+        return LecturaFoto(caption="pie", imagenes=["https://p16.tiktokcdn.com/a.jpeg"], origen="movil")
+
+    def ocr(_path: Path) -> str:
+        return textos["actual"]
+
+    def bajar(_url: str, workdir: Path, indice: int) -> Path:
+        destino = workdir / f"diapositiva-{indice}.img"
+        destino.write_bytes(b"x")
+        return destino
+
+    opciones = {
+        "fuente": "tiktok",
+        "maximo": 5,
+        "permitir_red": True,
+        "leer_tiktok": leer,
+        "ocr": ocr,
+        "descargar": bajar,
+        "dormir": lambda _segundos: None,
+        "reintentar": True,
+    }
+    ejecutar(db, settings, **opciones)
+    assert pendientes_de_analisis(db) == []
+    textos["actual"] = "nuevo"
+    ejecutar(db, settings, **opciones)
+    pendientes = pendientes_de_analisis(db)
+    assert [pieza["url"] for pieza in pendientes] == [url]
+    assert pendientes[0]["gancho_texto"] == "nuevo"
+    assert not pendientes[0].get("formato")
 
 
 def test_un_429_para_la_pasada_tras_un_reintento():

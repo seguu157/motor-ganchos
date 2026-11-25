@@ -155,16 +155,15 @@ def incorporar_html(lectura: LecturaFoto, html: str, origen: str) -> None:
             texto = caption_de_documento(doc)
             if texto:
                 lectura.caption = texto
-        if not lectura.imagenes:
-            imagenes = [item for item in imagenes_de_documento(doc) if host_de_imagen_permitido(item)]
-            if imagenes:
-                lectura.imagenes = imagenes
-                lectura.origen = origen
-                continue
-            mini = miniatura_oembed(doc)
-            if mini and not lectura.imagenes:
-                lectura.imagenes = [mini]
-                lectura.origen = "miniatura"
+        imagenes = [item for item in imagenes_de_documento(doc) if host_de_imagen_permitido(item)]
+        if imagenes and (not lectura.imagenes or lectura.origen == "miniatura"):
+            lectura.imagenes = imagenes
+            lectura.origen = origen
+            continue
+        mini = miniatura_oembed(doc)
+        if mini and not lectura.imagenes:
+            lectura.imagenes = [mini]
+            lectura.origen = "miniatura"
 
 
 def html_con_navegador(url: str) -> str:
@@ -216,7 +215,7 @@ def leer_slideshow(
         incorporar_html(lectura, respuesta.text, origen)
         if lectura.imagenes and lectura.origen != "miniatura" and lectura.caption:
             break
-    if not lectura.imagenes and navegador is not None:
+    if navegador is not None and (not lectura.imagenes or lectura.origen == "miniatura"):
         html = navegador(url) or ""
         if html:
             incorporar_html(lectura, html, "navegador")
