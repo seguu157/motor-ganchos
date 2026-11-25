@@ -28,6 +28,11 @@ def _entorno_limpio(monkeypatch):
         "RADAR_BROWSER_PAUSE_ACCOUNT",
         "RADAR_BROWSER_PAUSE_POST",
         "RADAR_COMMENT_WEIGHT",
+        "RADAR_TT_PAUSE",
+        "RADAR_TT_MAX",
+        "RADAR_TT_MAX_PAGINAS",
+        "RADAR_TT_VISTAS_MIN",
+        "RADAR_TT_APIFY_ACTOR",
     ):
         monkeypatch.delenv(key, raising=False)
 

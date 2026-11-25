@@ -128,6 +128,75 @@ CREATE TABLE IF NOT EXISTS proyectos (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tt_cuentas (
+    id INTEGER PRIMARY KEY,
+    handle TEXT NOT NULL UNIQUE,
+    url TEXT NOT NULL DEFAULT '',
+    nombre TEXT NOT NULL DEFAULT '',
+    bio TEXT NOT NULL DEFAULT '',
+    enlace_bio TEXT NOT NULL DEFAULT '',
+    que_vende TEXT NOT NULL DEFAULT '',
+    tipo_producto TEXT NOT NULL DEFAULT '',
+    nicho TEXT NOT NULL DEFAULT '',
+    subnicho TEXT NOT NULL DEFAULT '',
+    idioma TEXT NOT NULL DEFAULT '',
+    seguidores INTEGER,
+    posts_muestreados INTEGER,
+    fijados INTEGER,
+    mediana_vistas INTEGER,
+    slideshows_muestra TEXT NOT NULL DEFAULT '',
+    es_cuenta_slideshow TEXT NOT NULL DEFAULT '',
+    num_piezas_virales INTEGER,
+    num_virales_no_fijadas INTEGER,
+    mejor_reciente_url TEXT NOT NULL DEFAULT '',
+    mejor_reciente_vistas INTEGER,
+    mejor_reciente_multiplo REAL,
+    mejor_pieza_url TEXT NOT NULL DEFAULT '',
+    mejor_pieza_vistas INTEGER,
+    mejor_pieza_multiplo REAL,
+    mejor_pieza_slideshow TEXT NOT NULL DEFAULT '',
+    mejor_pieza_fijada TEXT NOT NULL DEFAULT '',
+    piezas_virales TEXT NOT NULL DEFAULT '',
+    ultima_publicacion TEXT NOT NULL DEFAULT '',
+    clasificacion TEXT NOT NULL DEFAULT '',
+    fecha_detectada TEXT NOT NULL DEFAULT '',
+    fecha_actualizada TEXT NOT NULL DEFAULT '',
+    fuente TEXT NOT NULL DEFAULT '',
+    semilla TEXT NOT NULL DEFAULT '',
+    estado TEXT NOT NULL DEFAULT 'candidata',
+    motivo TEXT NOT NULL DEFAULT '',
+    captions_json TEXT NOT NULL DEFAULT '[]',
+    raw_json TEXT,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS tt_semillas (
+    id INTEGER PRIMARY KEY,
+    tipo TEXT NOT NULL,
+    valor TEXT NOT NULL,
+    activa INTEGER NOT NULL DEFAULT 1,
+    notas TEXT NOT NULL DEFAULT '',
+    leida_en TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(tipo, valor)
+);
+
+CREATE TABLE IF NOT EXISTS tt_pasadas (
+    id INTEGER PRIMARY KEY,
+    tipo TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    leidas INTEGER NOT NULL DEFAULT 0,
+    nuevas INTEGER NOT NULL DEFAULT 0,
+    califican INTEGER NOT NULL DEFAULT 0,
+    descartadas INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_tt_cuentas_estado ON tt_cuentas(estado);
+CREATE INDEX IF NOT EXISTS idx_tt_cuentas_nicho ON tt_cuentas(nicho);
 """
 
 

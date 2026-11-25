@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">TikTok</p>
+  <h1>Cuentas que venden con slideshows</h1>
+  <p class="lede">Entran las que venden algo visible, publican slideshows al menos en la mitad de la muestra y tienen una pieza con el doble de la mediana y 50.000 vistas o más. La mediana sale de las últimas publicaciones del embed oficial, sin las fijadas. No hay cifras estimadas: si no se ha leído, no está.</p>
+</section>
+
+<p class="fine">Califican {{ conteos.get("califica", 0) }} · candidatas {{ conteos.get("candidata", 0) }} · descartadas {{ conteos.get("descartada", 0) }} · errores {{ conteos.get("error", 0) }}. La lectura se lanza en la terminal: <code>radar cuentas descubrir --yes</code> y <code>radar cuentas actualizar --yes</code>.</p>
+{% if pasada %}
+<p class="fine">Última pasada ({{ pasada.tipo }}): {{ pasada.message }}</p>
+{% endif %}
+
+<form class="filters" method="get" action="/tiktok">
+  <label>Buscar
+    <input type="search" name="q" value="{{ filtros.get('q', '') }}" placeholder="Cuenta, bio o producto">
+  </label>
+  <label>Nicho
+    <select name="nicho">
+      <option value="">Todos</option>
+      {% for nombre in nichos %}
+      <option value="{{ nombre }}" {% if filtros.get('nicho') == nombre %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Subnicho
+    <select name="subnicho">
+      <option value="">Todos</option>
+      {% for nombre in subnichos %}
+      <option value="{{ nombre }}" {% if filtros.get('subnicho') == nombre %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Vistas mínimas de la mejor pieza
+    <input name="vistas" inputmode="numeric" value="{{ filtros.get('vistas', '') }}" placeholder="50000">
+  </label>
+  <label>Estado
+    <select name="estado">
+      {% for opcion in ("califica", "candidata", "descartada", "error", "todas") %}
+      <option value="{{ opcion }}" {% if estado == opcion %}selected{% endif %}>{{ opcion }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Filtrar</button>
+</form>
+
+<p class="export-row"><span>{{ cuentas|length }} en este filtro</span> <a href="/tiktok/exportar.csv">Exportar CSV</a></p>
+
+<ul class="account-list">
+  {% for cuenta in cuentas %}
+  <li>
+    <div>
+      <a class="account" href="/tiktok/{{ cuenta.handle }}">@{{ cuenta.handle }}</a>
+      {% if cuenta.nicho %}<span class="chip">{{ cuenta.nicho }}</span>{% endif %}
+      {% if cuenta.subnicho %}<span class="chip quiet">{{ cuenta.subnicho }}</span>{% endif %}
+      {% if cuenta.es_cuenta_slideshow %}<span class="chip quiet">slideshow {{ cuenta.slideshows_muestra }}</span>{% endif %}
+      <p>{{ cuenta.que_vende or cuenta.motivo or "Sin producto leído" }}</p>
+      <p class="fine">{{ cuenta.seguidores|es_int }} seguidores · mediana {{ cuenta.mediana_vistas|es_int }} · mejor {{ cuenta.mejor_pieza_vistas|es_int }} ({{ cuenta.mejor_pieza_multiplo|multiple }}){% if cuenta.mejor_pieza_fijada == "sí" %} · fijada{% endif %} · no fijadas {{ cuenta.num_virales_no_fijadas if cuenta.num_virales_no_fijadas is not none else "—" }} · {{ cuenta.idioma or "—" }}</p>
+    </div>
+  </li>
+  {% else %}
+  <li class="empty">No hay cuentas con esos filtros. <code>radar cuentas descubrir --yes</code> lee candidatas nuevas.</li>
+  {% endfor %}
+</ul>
+
+<form class="add-account" method="post" action="/tiktok/semilla">
+  <label>Semilla para la próxima pasada
+    <input name="valor" required placeholder="@cuenta, #hashtag, keyword o https://...">
+  </label>
+  <label>Tipo
+    <select name="tipo">
+      <option value="">Detectar</option>
+      <option value="keyword">Palabra</option>
+      <option value="handle">Cuenta</option>
+      <option value="hashtag">Hashtag</option>
+      <option value="url">URL</option>
+    </select>
+  </label>
+  <button type="submit">Guardar semilla</button>
+</form>
+{% endblock %}

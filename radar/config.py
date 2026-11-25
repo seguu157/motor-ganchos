@@ -54,6 +54,11 @@ class Settings:
     codex_bin: str
     codex_timeout: float
     llm_call_delay: float
+    tt_pause: tuple[float, float]
+    tt_max_cuentas: int
+    tt_max_paginas: int
+    tt_vistas_min: int
+    tt_apify_actor: str | None
 
     @property
     def llm_api_key(self) -> str | None:
@@ -118,6 +123,11 @@ def load_settings() -> Settings:
         codex_bin=os.environ.get("RADAR_CODEX_BIN", "codex"),
         codex_timeout=_float("RADAR_CODEX_TIMEOUT", 180),
         llm_call_delay=_float("RADAR_LLM_DELAY_SECONDS", 2),
+        tt_pause=_span("RADAR_TT_PAUSE", (2.0, 6.0)),
+        tt_max_cuentas=_int("RADAR_TT_MAX", 12, minimum=1),
+        tt_max_paginas=_int("RADAR_TT_MAX_PAGINAS", 3, minimum=0),
+        tt_vistas_min=_int("RADAR_TT_VISTAS_MIN", 50_000, minimum=1),
+        tt_apify_actor=_blank(os.environ.get("RADAR_TT_APIFY_ACTOR")),
     )
 
 
