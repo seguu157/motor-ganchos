@@ -14,12 +14,13 @@ from radar.tiktok.apify_opcional import buscar_handles, handles_de_items
 from radar.tiktok.clasificar import Clasificador, heuristica
 from radar.tiktok.csvio import COLUMNAS_CSV, exportar_csv, importar_csv
 from radar.tiktok.descubrir import ejecutar_actualizacion, ejecutar_descubrimiento
-from radar.tiktok.fuente import Respuesta
+from radar.tiktok.consultas import tags_de_cuenta
+from radar.tiktok.fuente import Lector, Respuesta, TikTokBloqueado
 from radar.tiktok.parse import parsear_embed, parsear_perfil
 from radar.tiktok.programar import instalar_tarea, preparar_tarea
 from radar.tiktok.reglas import entero_vistas, evaluar, normalizar_handle
 from radar.tiktok.reglas import Pieza
-from radar.tiktok.store import anadir_semilla, guardar_cuenta, listar_cuentas, obtener_cuenta
+from radar.tiktok.store import anadir_semilla, guardar_cuenta, listar_cuentas, listar_semillas, obtener_cuenta
 from radar.web import create_app
 from tests.conftest import fresh_db
 
@@ -567,6 +568,83 @@ def test_el_10221_se_explica_y_no_tira_un_embed_con_piezas(settings, tmp_path):
     assert leida["seguidores"] is None
     assert leida["mejor_pieza_vistas"] == 800_000
     assert "10221" not in (leida["motivo"] or "")
+
+
+def test_los_tags_salen_del_producto_y_del_nicho_no_del_pie(settings, tmp_path):
+    db = fresh_db(tmp_path)
+    guardar_cuenta(
+        db,
+        {
+            "handle": "easystars",
+            "estado": "califica",
+            "que_vende": "EasyStars (app)",
+            "nicho": "Espiritualidad y astrología",
+            "subnicho": "Astrología IA",
+            "fecha_detectada": "2026-11-24",
+            "captions": ["visita #abbayedesvauxdecernay y #alcachofadeducha"],
+        },
+    )
+    tags = tags_de_cuenta(obtener_cuenta(db, "easystars"))
+    assert "easystars" in tags
+    assert "astrologia" in tags
+    assert "abbayedesvauxdecernay" not in tags
+    assert "alcachofadeducha" not in tags
+    anadir_semilla(db, "hashtag", "abbayedesvauxdecernay", notas="visto en @easystars")
+    anadir_semilla(db, "hashtag", "aceitedebatana", notas="visto en @easystars")
+    red = _Red()
+    opciones = _kwargs(red, settings)
+    opciones["max_paginas"] = 8
+    ejecutar_descubrimiento(db, settings, max_cuentas=0, **opciones)
+    pedidos = " ".join(red.urls)
+    assert "abbayedesvauxdecernay" not in pedidos
+    assert "aceitedebatana" not in pedidos
+    assert "alcachofadeducha" not in pedidos
+    assert "easystars" in pedidos or "astrologia" in pedidos
+    guardados = {semilla["valor"] for semilla in listar_semillas(db, solo_activas=False) if semilla["tipo"] == "hashtag"}
+    assert "astrologia" in guardados
+    assert "easystars" in guardados
+
+
+def test_un_429_espera_y_solo_reintenta_una_vez():
+    import random
+
+    class _Siempre:
+        def __init__(self) -> None:
+            self.n = 0
+
+        def get(self, url: str) -> Respuesta:
+            self.n += 1
+            return Respuesta(429, "no", url)
+
+    dormidos: list[float] = []
+    siempre = _Siempre()
+    lector = Lector(siempre, dormir=dormidos.append, rng=random.Random(0))
+    with pytest.raises(TikTokBloqueado, match="reintentado una vez"):
+        lector.perfil("mala.cuenta")
+    assert siempre.n == 2
+    assert len(dormidos) == 1
+    assert 60 <= dormidos[0] <= 120
+
+    class _Una:
+        def __init__(self) -> None:
+            self.n = 0
+
+        def get(self, url: str) -> Respuesta:
+            self.n += 1
+            if "otra.cuenta" in url or self.n == 1:
+                return Respuesta(429, "no", url)
+            return Respuesta(200, "<html>ok</html>", url)
+
+    una = _Una()
+    esperas: list[float] = []
+    lector_ok = Lector(una, dormir=esperas.append, rng=random.Random(0))
+    perfil = lector_ok.perfil("mala.cuenta")
+    assert una.n == 2
+    assert len(esperas) == 1
+    assert perfil.error
+    with pytest.raises(TikTokBloqueado, match="429"):
+        lector_ok.perfil("otra.cuenta")
+    assert len(esperas) == 1
 
 
 def test_la_web_filtra_el_corte_por_nicho_y_vistas(settings):

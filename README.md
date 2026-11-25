@@ -364,13 +364,13 @@ Sin `--yes` no hay ninguna petición: solo enseña el plan. `descubrir` encola h
 
 De dónde salen las cuentas, sin login y sin API de pago:
 
-- El embed público del tag, `tiktok.com/embed/tag/nombre`. La página `/tag/` a secas no trae autores. El embed sí: el campo `authorUniqueId`. Los nombres salen de lo que ya venden las cuentas guardadas (EasyStars, Vent Now, …) y de las semillas.
+- El embed público del tag, `tiktok.com/embed/tag/nombre`. La página `/tag/` a secas no trae autores. El embed sí: el campo `authorUniqueId`. El tag sale del nombre de la app y de las palabras del nicho de las cuentas que ya califican (EasyStars, astrología, …), más las semillas que añadas tú. Un hashtag suelto del pie, si no es eso, no se guarda ni se abre.
 - Búsquedas `site:tiktok.com/photo "nombre de la app"` en Bing (RSS) y en el HTML de DuckDuckGo. Si el buscador no devuelve enlaces, no se inventa ninguno.
 - Listas públicas (por defecto gr0w, Reelsfarm y similares) y los enlaces de categorías de esa misma web.
 - Menciones `@cuenta` en bios y pies ya leídos.
 - Apify solo si pasas `--apify` y hay `APIFY_TOKEN` y `RADAR_TT_APIFY_ACTOR`. Si falta cualquiera, no se llama. Del actor solo se guardan handles; las vistas se leen después en el embed.
 
-Entre lecturas hay una pausa al azar (`RADAR_TT_PAUSE`, por defecto 2–6 segundos). `RADAR_TT_MAX` (12) es cuántas cuentas se leen enteras; las demás se quedan en cola para la siguiente pasada. `RADAR_TT_MAX_PAGINAS` (12) es cuántas páginas de descubrimiento se abren. `RADAR_TT_VISTAS_MIN` (50000) es el suelo de vistas, además del doble de la mediana. Un 403 o un 429 paran la pasada. El status 10221 de una cuenta (privada o embed no disponible) se anota en esa cuenta y no para el resto. Lo ya guardado se queda.
+Entre lecturas hay una pausa al azar (`RADAR_TT_PAUSE`, por defecto 2–6 segundos). `RADAR_TT_MAX` (12) es cuántas cuentas se leen enteras; las demás se quedan en cola para la siguiente pasada. `RADAR_TT_MAX_PAGINAS` (12) es cuántas páginas de descubrimiento se abren. `RADAR_TT_VISTAS_MIN` (50000) es el suelo de vistas, además del doble de la mediana. Un 403 para la pasada a la primera. Un 429 espera entre 60 y 120 segundos y reintenta esa petición una vez; si vuelve a responder 429, para. El status 10221 de una cuenta (privada o embed no disponible) se anota en esa cuenta y no para el resto. Lo ya guardado se queda.
 
 El nicho, el subnicho y el «qué vende» los propone el mismo LLM que el resto de la app (`codex exec` por defecto). Si no responde, se usa una heurística y la ficha queda como «REVISAR». Una clasificación «revisada a mano» no se pisa al actualizar.
 

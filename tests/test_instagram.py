@@ -508,9 +508,7 @@ def test_sin_yes_no_hay_peticion_y_la_tarea_no_llama_a_schtasks(settings, tmp_pa
     script = tmp_path / "data" / "radar-creadores-instagram.ps1"
     assert script.is_file()
     assert "ciclo --yes" in script.read_text(encoding="utf-8")
-    import os
-
-    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr("radar.instagram.programar._es_windows", lambda: False)
     programa = preparar_tarea(cwd=tmp_path, destino=tmp_path / "tarea.ps1", hora="07:30", python=r"C:\repo\.venv\Scripts\python.exe")
     assert "Windows" in instalar_tarea(programa)
     with pytest.raises(ValueError):

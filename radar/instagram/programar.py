@@ -59,12 +59,17 @@ def preparar_tarea(
     return Programa(tarea=tarea, hora=hora, script=script, ruta_script=ruta, comando=comando)
 
 
+def _es_windows() -> bool:
+    import os
+
+    return os.name == "nt"
+
+
 def instalar_tarea(programa: Programa) -> str:
     """Registra la tarea. Solo Windows: en otros sistemas no llama a schtasks."""
-    import os
     import subprocess
 
-    if os.name != "nt":
+    if not _es_windows():
         return (
             "El Programador de tareas es de Windows. "
             "El script ya está escrito; el comando para registrarlo es el de arriba."

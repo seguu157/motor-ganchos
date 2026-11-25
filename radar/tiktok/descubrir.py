@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 from radar.db import Database, utc_now
 from radar.tiktok.apify_opcional import buscar_handles
 from radar.tiktok.clasificar import Clasificador
-from radar.tiktok.consultas import ordenar_paginas, preparar_consultas
+from radar.tiktok.consultas import ordenar_paginas, preparar_consultas, semilla_de_tag_util, tags_de_cuenta
 from radar.tiktok.fuente import Lector, TikTokBloqueado, Transporte, pausar, url_hashtag
 from radar.tiktok.parse import motivo_sin_perfil
-from radar.tiktok.reglas import evaluar, hashtags, menciones, normalizar_handle, slugs_de_keyword
+from radar.tiktok.reglas import evaluar, menciones, normalizar_handle, slugs_de_keyword
 from radar.tiktok.store import (
     anadir_semilla,
     asegurar_semillas_defecto,
@@ -214,8 +214,9 @@ def _leer_y_guardar(
         conocidas = handles_conocidos(db)
         for mencionado in menciones(texto):
             encolar_handle(db, mencionado, f"mencion:@{handle}", conocidas)
-        for tag in hashtags(texto)[:8]:
-            anadir_semilla(db, "hashtag", tag, notas=f"visto en @{handle}")
+        # El tag sale del producto y del nicho, no de cada hashtag del pie.
+        for tag in tags_de_cuenta({**datos, "handle": handle}):
+            anadir_semilla(db, "hashtag", tag, notas="producto o nicho")
     return resultado.estado
 
 
@@ -272,7 +273,11 @@ def _paginas(
     if max_paginas <= 0:
         return
     preparar_consultas(db)
-    plan = ordenar_paginas(listar_semillas(db), max_paginas)
+    validos = set()
+    for cuenta in listar_cuentas(db, estado="califica"):
+        validos.update(tags_de_cuenta(cuenta))
+    semillas = [semilla for semilla in listar_semillas(db) if semilla_de_tag_util(semilla, validos)]
+    plan = ordenar_paginas(semillas, max_paginas)
     hechas = 0
     vistas: set[str] = set()
     extra: list[str] = []
@@ -421,7 +426,7 @@ def ejecutar_descubrimiento(
             for handle in resultado.handles:
                 encolar_handle(db, handle, f"apify:{settings.tt_apify_actor or 'actor'}", conocidas)
         bola_de_nieve_local(db, conocidas)
-        lector = Lector(transporte)
+        lector = Lector(transporte, dormir=dormir, rng=rng)
         bloqueado = False
         texto_bloqueo = ""
         leidas = nuevas = califican = descartadas = 0
@@ -533,7 +538,7 @@ def ejecutar_actualizacion(
     tramo = pausa if pausa is not None else settings.tt_pause
     leidas = nuevas = califican = descartadas = 0
     try:
-        lector = Lector(transporte)
+        lector = Lector(transporte, dormir=dormir, rng=rng)
         try:
             leidas, nuevas, califican, descartadas = _consumir(
                 db,
