@@ -20,6 +20,7 @@ from radar.tiktok.store import anadir_semilla, listar_cuentas, listar_semillas
 _RUIDO = {
     "amazon",
     "app",
+    "apps",
     "beacons",
     "ebook",
     "enlace",
@@ -31,6 +32,20 @@ _RUIDO = {
     "shopmy",
     "store",
     "tienda",
+}
+_STOP = {
+    "and",
+    "con",
+    "del",
+    "for",
+    "las",
+    "los",
+    "para",
+    "por",
+    "que",
+    "the",
+    "una",
+    "with",
 }
 _NO_SIGUE = (".js", ".css", ".png", ".jpg", ".jpeg", ".svg", ".woff", ".woff2", ".ico", ".gif", ".webp")
 _LISTADO = ("tiktok", "slideshow", "example", "outlier", "hook")
@@ -47,6 +62,42 @@ def slug_de_nombre(nombre: str) -> str:
     if len(slug) < 4 or slug in _RUIDO or slug.startswith("producto") or slug.startswith("enlace"):
         return ""
     return slug[:40]
+
+
+def _sin_acentos(texto: str) -> str:
+    import unicodedata
+
+    base = unicodedata.normalize("NFD", texto or "")
+    return "".join(caracter for caracter in base if unicodedata.category(caracter) != "Mn").casefold()
+
+
+def tags_de_cuenta(cuenta: dict) -> list[str]:
+    """Tags de descubrimiento: el nombre de la app y las palabras del nicho.
+
+    Los hashtags sueltos del pie (un lugar, un aceite, una ducha) no entran.
+    """
+    tags: list[str] = []
+    slug = slug_de_nombre(nombre_producto(cuenta.get("que_vende") or ""))
+    if slug:
+        tags.append(slug)
+    for texto in (cuenta.get("subnicho") or "", cuenta.get("nicho") or ""):
+        for palabra in re.findall(r"[a-z0-9]{4,}", _sin_acentos(texto)):
+            if palabra in _RUIDO or palabra in _STOP or palabra in tags:
+                continue
+            tags.append(palabra)
+            if len(tags) >= 6:
+                return tags
+    return tags
+
+
+def semilla_de_tag_util(semilla: dict, tags_validos: set[str]) -> bool:
+    """Una semilla de hashtag guardada desde un pie solo vale si es producto o nicho."""
+    if semilla.get("tipo") != "hashtag":
+        return True
+    notas = semilla.get("notas") or ""
+    if not notas.startswith("visto en @"):
+        return True
+    return (semilla.get("valor") or "") in tags_validos
 
 
 def consulta_site(nombre: str) -> str:
@@ -72,6 +123,11 @@ def preparar_consultas(db: Database) -> int:
         slug = slug_de_nombre(nombre)
         if slug and _alta(db, "hashtag", slug, "producto de la base"):
             nuevas += 1
+        for tag in tags_de_cuenta(cuenta):
+            if tag == slug:
+                continue
+            if _alta(db, "hashtag", tag, "nicho de la base"):
+                nuevas += 1
         consulta = consulta_site(nombre)
         if consulta:
             if _alta(db, "busqueda", url_bing(consulta), nombre):

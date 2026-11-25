@@ -25,6 +25,11 @@ class TikTokBloqueado(RuntimeError):
     """TikTok ha cortado la lectura. No se reintenta en la misma pasada."""
 
 
+# Un 429 se espera una vez, con una pausa larga, y se repite esa petición.
+# Si vuelve a responder 429, la pasada para. 403 y 503 paran a la primera.
+PAUSA_429 = (60.0, 120.0)
+
+
 @dataclass
 class Respuesta:
     status: int
@@ -81,14 +86,36 @@ def url_hashtag(tag: str) -> str:
 
 
 class Lector:
-    """Una pasada. Un 403/429 para en seco. Dos páginas vacías seguidas, también."""
+    """Una pasada. Un 403 para en seco. Un 429 espera y se reintenta una vez."""
 
-    def __init__(self, transporte: Transporte) -> None:
+    def __init__(
+        self,
+        transporte: Transporte,
+        *,
+        dormir=None,
+        rng: random.Random | None = None,
+        pausa_429: tuple[float, float] = PAUSA_429,
+    ) -> None:
         self.transporte = transporte
         self._vacios = 0
+        self._dormir = dormir or _dormir
+        self._rng = rng or random.Random()
+        self._pausa_429 = pausa_429
+        self._reintento_429 = False
 
     def _leer(self, url: str) -> Respuesta:
         respuesta = self.transporte.get(url)
+        if respuesta.status == 429 and not self._reintento_429:
+            self._reintento_429 = True
+            bajo, alto = self._pausa_429
+            if alto > 0:
+                self._dormir(self._rng.uniform(bajo, alto))
+            respuesta = self.transporte.get(url)
+            if respuesta.status == 429:
+                raise TikTokBloqueado(
+                    "TikTok ha respondido 429. Se ha esperado y se ha reintentado una vez. "
+                    "Lo ya guardado se queda. No se reintenta más en esta pasada."
+                )
         if respuesta.status in {403, 429, 503}:
             raise TikTokBloqueado(
                 f"TikTok ha respondido {respuesta.status}. "
@@ -134,3 +161,9 @@ def pausar(rng: random.Random, dormir, tramo: tuple[float, float]) -> None:
     if alto <= 0:
         return
     dormir(rng.uniform(bajo, alto))
+
+
+def _dormir(segundos: float) -> None:
+    import time
+
+    time.sleep(segundos)
