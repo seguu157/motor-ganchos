@@ -23,7 +23,7 @@ def guardar_pieza(db: Database, datos: dict[str, Any]) -> int:
         diapositivas_json = json.dumps(diapositivas, ensure_ascii=False)
     with db.connect() as conn:
         previo = conn.execute(
-            "SELECT id, created_at FROM gh_piezas WHERE fuente = ? AND url = ?",
+            "SELECT * FROM gh_piezas WHERE fuente = ? AND url = ?",
             (fuente, url),
         ).fetchone()
         columnas = {
@@ -63,7 +63,17 @@ def guardar_pieza(db: Database, datos: dict[str, Any]) -> int:
             f"UPDATE gh_piezas SET {asignacion} WHERE id = ?",
             [*valores, int(previo["id"])],
         )
+        if columnas.get("estado") == "extraida" and _material_distinto(previo, columnas):
+            conn.execute("DELETE FROM gh_analisis WHERE pieza_id = ?", (int(previo["id"]),))
         return int(previo["id"])
+
+
+def _material_distinto(previo, nuevo: dict[str, Any]) -> bool:
+    """El texto leído cambió: el análisis viejo ya no vale."""
+    campos = ("gancho_texto", "caption", "transcripcion", "texto_pantalla", "diapositivas_json")
+    antes = tuple(str(previo[campo] or "") for campo in campos) + (int(previo["num_diapositivas"] or 0),)
+    ahora = tuple(str(nuevo.get(campo) or "") for campo in campos) + (int(nuevo.get("num_diapositivas") or 0),)
+    return antes != ahora
 
 
 def obtener_por_url(db: Database, fuente: str, url: str) -> dict[str, Any] | None:
