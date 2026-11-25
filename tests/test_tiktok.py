@@ -224,7 +224,7 @@ def test_descubre_por_mencion_lista_y_para_si_bloquean(settings, tmp_path):
                 '<a href="https://www.tiktok.com/@app.estudio">lista</a>',
                 "https://listas.test/apps",
             ),
-            "https://www.tiktok.com/tag/studyapp": Respuesta(
+            "https://www.tiktok.com/embed/tag/studyapp": Respuesta(
                 200,
                 '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">'
                 '{"__DEFAULT_SCOPE__":{"webapp.hashtag":{"itemList":[{"author":{"uniqueId":"zz.tag","nickname":"T"}}]}}}'
@@ -463,13 +463,110 @@ def test_sin_yes_no_hay_peticion_y_la_tarea_no_llama_a_schtasks(settings, tmp_pa
     script = tmp_path / "data" / "radar-cuentas-tiktok.ps1"
     assert script.is_file()
     assert "ciclo --yes" in script.read_text(encoding="utf-8")
-    import os
-
-    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr("radar.tiktok.programar._es_windows", lambda: False)
     programa = preparar_tarea(cwd=tmp_path, destino=tmp_path / "tarea.ps1", hora="07:30", python=r"C:\repo\.venv\Scripts\python.exe")
     assert "Windows" in instalar_tarea(programa)
     with pytest.raises(ValueError):
         preparar_tarea(hora="25:99")
+
+
+def _html_tag(tag: str, cuantos: int = 20) -> str:
+    videos = ",".join(
+        '{"id":"%s","authorUniqueId":"%suser%d","desc":"photo","playCount":10,"coverUrl":"https://cdn/photomode/x"}'
+        % (indice, tag, indice)
+        for indice in range(cuantos)
+    )
+    return (
+        '<script id="__FRONTITY_CONNECT_STATE__" type="application/json">'
+        '{"source":{"data":{"/embed/tag/%s":{"videoList":[%s]}}}}</script>' % (tag, videos)
+    )
+
+
+class _RedTags(_Red):
+    def get(self, url: str) -> Respuesta:
+        self.urls.append(url)
+        if "/embed/tag/" in url:
+            tag = url.rstrip("/").rsplit("/", 1)[-1]
+            return Respuesta(200, _html_tag(tag), url)
+        return Respuesta(200, "<html></html>", url)
+
+
+def test_el_embed_de_un_tag_encola_decenas(settings, tmp_path):
+    from radar.tiktok.consultas import consulta_site, enlaces_de_listado, slug_de_nombre
+    from radar.tiktok.parse import handles_publicos, motivo_sin_perfil
+    from radar.tiktok.store import contar_por_estado
+
+    assert slug_de_nombre("EasyStars") == "easystars"
+    assert slug_de_nombre("Producto en Amazon") == ""
+    assert 'site:tiktok.com/photo "EasyStars"' == consulta_site("EasyStars (easystars.ai)")
+    assert motivo_sin_perfil("status 10221 ") == "cuenta privada o embed no disponible (status 10221)"
+    html = _html_tag("easystars", 4)
+    assert handles_publicos(html) == ["easystarsuser0", "easystarsuser1", "easystarsuser2", "easystarsuser3"]
+    enlaces = enlaces_de_listado(
+        '<a href="/tiktok/study-apps">a</a><a href="/app.js">b</a><a href="https://otro.test/tiktok/x">c</a>',
+        "https://gr0w.app/tiktok",
+    )
+    assert enlaces == ["https://gr0w.app/tiktok/study-apps"]
+    assert enlaces_de_listado(
+        '<a href="/tag/slideshow?refer=1&amp;embed_source=1">t</a>',
+        "https://www.tiktok.com/embed/tag/easystars",
+    ) == []
+
+    db = fresh_db(tmp_path)
+    red = _RedTags()
+    opciones = _kwargs(red, settings)
+    opciones["max_paginas"] = 6
+    informe = ejecutar_descubrimiento(db, settings, max_cuentas=0, **opciones)
+    assert informe.bloqueado is False
+    assert "No se ha hecho ninguna petición" not in informe.mensaje
+    assert contar_por_estado(db).get("candidata", 0) >= 40
+
+
+def _perfil_10221(handle: str) -> str:
+    payload = {"__DEFAULT_SCOPE__": {"webapp.user-detail": {"statusCode": 10221, "statusMsg": ""}}}
+    return (
+        '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">'
+        + json.dumps(payload)
+        + "</script>"
+    )
+
+
+def test_el_10221_se_explica_y_no_tira_un_embed_con_piezas(settings, tmp_path):
+    db = fresh_db(tmp_path)
+    guardar_cuenta(db, {"handle": "cerrada", "estado": "candidata", "fecha_detectada": "2026-11-01", "fecha_actualizada": ""})
+    red = _Red(
+        {
+            "https://www.tiktok.com/@cerrada": Respuesta(200, _perfil_10221("cerrada"), "p"),
+            "https://www.tiktok.com/embed/@cerrada": Respuesta(200, "<html>sin embed</html>", "e"),
+        }
+    )
+    opciones = _kwargs(red, settings)
+    opciones["max_paginas"] = 0
+    informe = ejecutar_descubrimiento(db, settings, max_cuentas=1, **opciones)
+    assert informe.bloqueado is False
+    cuenta = obtener_cuenta(db, "cerrada")
+    assert cuenta["estado"] == "descartada"
+    assert cuenta["motivo"] == "cuenta privada o embed no disponible (status 10221)"
+    assert cuenta["seguidores"] is None
+    assert cuenta["mediana_vistas"] is None
+
+    db2 = fresh_db(tmp_path / "otro")
+    _, embed = _muestra_viral("app.estudio")
+    guardar_cuenta(db2, {"handle": "app.estudio", "estado": "candidata", "fecha_detectada": "2026-11-01", "fecha_actualizada": ""})
+    red2 = _Red(
+        {
+            "https://www.tiktok.com/@app.estudio": Respuesta(200, _perfil_10221("app.estudio"), "p"),
+            "https://www.tiktok.com/embed/@app.estudio": Respuesta(200, embed, "e"),
+        }
+    )
+    opciones2 = _kwargs(red2, settings)
+    opciones2["max_paginas"] = 0
+    ejecutar_descubrimiento(db2, settings, max_cuentas=1, **opciones2)
+    leida = obtener_cuenta(db2, "app.estudio")
+    assert leida["estado"] == "califica"
+    assert leida["seguidores"] is None
+    assert leida["mejor_pieza_vistas"] == 800_000
+    assert "10221" not in (leida["motivo"] or "")
 
 
 def test_la_web_filtra_el_corte_por_nicho_y_vistas(settings):

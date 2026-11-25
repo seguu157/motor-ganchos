@@ -260,8 +260,8 @@ def contar_por_estado(db: Database) -> dict[str, int]:
 
 def anadir_semilla(db: Database, tipo: str, valor: str, *, notas: str = "") -> None:
     tipo_limpio = (tipo or "").strip().casefold()
-    if tipo_limpio not in {"handle", "keyword", "hashtag", "url"}:
-        raise ValueError("El tipo de semilla tiene que ser handle, keyword, hashtag o url.")
+    if tipo_limpio not in {"handle", "keyword", "hashtag", "url", "busqueda"}:
+        raise ValueError("El tipo de semilla tiene que ser handle, keyword, hashtag, url o busqueda.")
     limpio = (valor or "").strip()
     if tipo_limpio == "handle":
         limpio = normalizar_handle(limpio)
