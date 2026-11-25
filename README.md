@@ -6,7 +6,7 @@ La interfaz está en español. La biblioteca filtra por categoría, formato y te
 
 No inventa métricas. Si un dato no viene del navegador, de Apify, de Instaloader, de la transcripción, del OCR, del embed público de TikTok, de la pestaña Reels o de una fixture marcada como ejemplo, no aparece.
 
-También vigila cuentas de TikTok que venden con slideshows ([Radar de cuentas TikTok](#radar-de-cuentas-tiktok)) y creadores de Instagram del nicho de IA ([Radar de creadores de Instagram](#radar-de-creadores-de-instagram)).
+También vigila cuentas de TikTok que venden con slideshows ([Radar de cuentas TikTok](#radar-de-cuentas-tiktok)) y creadores de Instagram del nicho de IA ([Radar de creadores de Instagram](#radar-de-creadores-de-instagram)). De las piezas virales que no están fijadas saca una biblioteca de ganchos y formatos ([Ganchos y formatos](#ganchos-y-formatos)).
 
 ## Qué hace una tanda
 
@@ -335,6 +335,11 @@ radar creadores descubrir --yes
 radar creadores ciclo --yes
 radar creadores exportar --out cuentas-instagram.csv
 radar creadores programar
+radar ganchos extraer --fuente todas --max 8
+radar ganchos extraer --fuente tiktok --yes
+radar ganchos analizar --yes
+radar ganchos exportar --out data/ganchos
+radar ganchos programar
 ```
 
 `radar run --yes` es el comando del cron de la watchlist. El de TikTok y el de creadores de Instagram, cada mañana en Windows, están en las secciones siguientes.
@@ -343,7 +348,7 @@ radar creadores programar
 
 Busca cuentas que venden algo (sobre todo apps, también tiendas y productos) con slideshows, se queda con las que tienen viralidad real y las acumula por handle. La pestaña está en `radar serve`, ruta `/tiktok`.
 
-Una pieza cuenta como viral si sus vistas son **al menos el doble de la mediana** y **al menos 50.000**. La mediana es la de las últimas publicaciones que devuelve `https://www.tiktok.com/embed/@usuario` (unas 10), sin las fijadas. Si el embed trae más de 10, las que van delante se tratan como fijadas y pueden ser la mejor pieza, pero se marcan. La cuenta pasa si además vende algo que se ve en la bio, el enlace o los pies, y al menos la mitad de la muestra es slideshow (portada `photomode`).
+Una pieza cuenta como viral si **no está fijada**, sus vistas son **al menos el doble de la mediana** y **al menos 50.000**. La mediana es la de las últimas publicaciones que devuelve `https://www.tiktok.com/embed/@usuario` (unas 10), sin las fijadas. Si el embed trae `isPinned`, `is_top` o la insignia de fijada, manda esa marca. Si no trae ninguna, las que van delante por encima de 10 se tratan como fijadas: es el orden del embed. Una fijada no entra en la mediana, no cuenta como viral y no puede ser la mejor pieza. La cuenta pasa si además vende algo que se ve en la bio, el enlace o los pies, y al menos la mitad de la muestra es slideshow (portada `photomode`).
 
 Las cifras salen de esa lectura. Si TikTok no devuelve seguidores o vistas, el campo se queda vacío: no se pone un cero ni se redondea un «1,2M» a mano. La columna `fuente` dice de dónde salió y qué día se leyó.
 
@@ -387,7 +392,7 @@ Eso escribe `data\radar-cuentas-tiktok.ps1` (entra en la carpeta del proyecto y 
 
 Busca creadores del nicho de inteligencia artificial y de negocios montados con IA (herramientas, automatización, agencia, productividad, programación o vibe coding, noticias, solopreneurs) que tengan al menos un reel viral, y los acumula por usuario. La pestaña está en `radar serve`, ruta `/instagram`. Español e inglés salen primero.
 
-Un reel cuenta como viral si sus reproducciones son **al menos el doble de la mediana** y **al menos 50.000**. La mediana es la de hasta 20 reels recientes **no fijados** que traen cifra. Los fijados pueden ser la mejor pieza, y se marcan, pero no entran en la mediana. Los carruseles no entran. La cuenta pasa si, además, la bio y los pies son de ese nicho.
+Un reel cuenta como viral si **no está fijado**, sus reproducciones son **al menos el doble de la mediana** y **al menos 50.000**. La mediana es la de hasta 20 reels recientes **no fijados** que traen cifra. La marca sale de `pinned`, `timeline_pinned_user_ids`, `clips_tab_pinned_user_ids`, `pinned_for_users` o la insignia de fijado. Un fijado no entra en la mediana, no cuenta como viral y no puede ser la mejor pieza. Los carruseles no entran. La cuenta pasa si, además, la bio y los pies son de ese nicho.
 
 Las cifras salen de la pestaña Reels, leída con la misma sesión de Chromium que el motor (`radar login`, carpeta `IG_BROWSER_PROFILE`). Si Instagram no devuelve seguidores o reproducciones, el campo se queda vacío: no se pone un cero ni se interpreta un «1,2M». La columna `fuente` dice de dónde salió y qué día se leyó.
 
@@ -427,6 +432,46 @@ radar creadores programar --hora 07:30 --instalar
 Eso escribe `data\radar-creadores-instagram.ps1` (entra en la carpeta del proyecto y lanza `radar creadores ciclo --yes`) e imprime el `schtasks` correspondiente. `--instalar` registra la tarea solo en Windows. Hace falta haber hecho `radar login` en esa misma máquina: la tarea reutiliza el perfil del navegador.
 
 `radar run --yes` es el comando del cron de la watchlist de ganchos. Imprime la fuente y la estimación, y luego lanza. Con el navegador o con Instaloader el coste impreso es 0,00 USD. `--skip-transcribe` y `--skip-llm` saltan esos pasos. `--source` vale `playwright`, `apify`, `instaloader` o `auto`.
+
+El corte ya importado puede seguir listando una fijada como mejor pieza, con la marca `| fijado`. La biblioteca de ganchos no la lee. La ficha la enseña aparte, bajo «no cuentan». La próxima `radar cuentas actualizar` o `radar creadores actualizar` vuelve a calcular la mediana y las virales sin esas piezas.
+
+## Ganchos y formatos
+
+De las cuentas que califican saca el gancho y el formato de cada pieza viral **no fijada**, y los deja en una biblioteca que se puede filtrar. La pestaña está en `radar serve`, ruta `/ganchos`. El ranking de formatos está en `/ganchos/formatos`.
+
+El orden de lectura es el múltiplo guardado (de mayor a menor) y, si empatan, las vistas. `--max` corta esa cola. Sin `--max`, TikTok se queda en `RADAR_TT_MAX` (12) e Instagram en `RADAR_IG_CREADORES_MAX` (30). Una fijada se anota en la base con `fijada = 1` y estado `omitida`: no se descarga, no se transcribe y no se analiza. Un vídeo de TikTok (la línea trae `| vídeo`) tampoco entra: aquí solo slideshows.
+
+```powershell
+radar ganchos extraer --fuente todas
+radar ganchos extraer --fuente tiktok --max 8 --yes
+radar ganchos extraer --fuente instagram --yes
+radar ganchos analizar
+radar ganchos analizar --yes
+radar ganchos ciclo --yes
+radar ganchos exportar --out data/ganchos
+radar ganchos programar --hora 09:00
+```
+
+Sin `--yes`, `extraer` y `analizar` solo enseñan el plan. No hay peticiones ni llamadas al modelo.
+
+**TikTok.** Para cada slideshow viral pide la página pública, el embed y, si hace falta, el oEmbed. No hay login. Entre lecturas usa `RADAR_TT_PAUSE` (2–6 segundos). Un 403 para la pasada. Un 429 espera y reintenta esa petición una vez; si se repite, para. Lo ya guardado se queda. De cada imagen (solo CDN de TikTok) pasa OCR y guarda el número de diapositivas, el texto de cada una, el pie, la diapositiva en la que aparece el producto y el CTA si el texto lo dice. Si el OCR no lee nada, no se inventa el gancho.
+
+**Instagram.** Reutiliza la sesión de `radar login` y las mismas pausas del radar de creadores (`RADAR_IG_CREADORES_PAUSE`, 25–50 segundos). Abre el reel, guarda el pie, transcribe el audio con faster-whisper y lee el texto en pantalla (el que trae la ficha o, si no, el OCR de la portada de Instagram). Un 401, un 403, un 429, un checkpoint o un challenge paran la pasada. Si al abrir el reel la ficha dice que está fijado, se marca y no se analiza.
+
+**Análisis.** Lo hace el mismo Codex de la suscripción de ChatGPT (`codex exec`), una pieza cada vez, con la pausa `RADAR_LLM_DELAY_SECONDS`. De cada pieza pide el gancho (primera diapositiva, o lo dicho en los primeros segundos más el texto en pantalla), el tipo, el formato (lista, antes y después, historia en primera persona, cosas que me hubiera gustado saber, mito y verdad, tutorial, comparación…), cómo entra el producto, el ángulo, por qué encaja con el material y una plantilla con `[X]`. La adaptación al perfil de `radar perfil` se guarda como **sugerencia**: no es una métrica. Si el modelo mete una cifra que no estaba en la pieza, la ficha lo avisa.
+
+Lo ya analizado se salta. Una pieza cuyo JSON no valió sigue pendiente y entra en la siguiente pasada. Si Codex responde límite de uso, la tanda para y la próxima ejecución sigue por las que faltan. El tope `--max` cuenta solo piezas que aún no se han leído, así que cada pasada avanza por la cola. El ranking agrupa por nicho y subnicho: cuántas piezas y la mediana de su múltiplo guardado. Cada fila enlaza la URL de la pieza. No se calcula un múltiplo nuevo.
+
+`exportar --out` escribe Markdown y CSV. Si `--out` es una carpeta, crea `ganchos.md` y `ganchos.csv`. Si es un `.md` o un `.csv`, escribe los dos al lado.
+
+En Windows, después de las otras dos tareas:
+
+```powershell
+radar ganchos programar --hora 09:00
+radar ganchos programar --hora 09:00 --instalar
+```
+
+Eso escribe `data\radar-ganchos.ps1` (`radar ganchos ciclo --yes`) e imprime el `schtasks`. `--instalar` registra la tarea solo en Windows. Conviene lanzarla cuando TikTok e Instagram ya han terminado, para que la cola tenga piezas nuevas.
 
 ## Docker y cron
 

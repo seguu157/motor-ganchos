@@ -138,11 +138,12 @@ def test_la_mediana_ignora_fijadas_y_exige_suelo():
     assert resultado.fijados == 3
     assert resultado.mediana_vistas == 1_000
     assert resultado.estado == "califica"
-    assert resultado.num_piezas_virales == 2
+    assert resultado.num_piezas_virales == 1
     assert resultado.num_virales_no_fijadas == 1
-    assert resultado.mejor_pieza_fijada == "sí"
-    assert resultado.mejor_pieza_vistas == 800_000
+    assert resultado.mejor_pieza_fijada == "no"
+    assert resultado.mejor_pieza_vistas == 80_000
     assert resultado.mejor_reciente_vistas == 80_000
+    assert "photo/0" not in resultado.piezas_virales
     bajo = evaluar(
         [Pieza(str(i), "u", "", 1_000 if i else 40_000, True, None) for i in range(10)],
         bio="Download the app https://studyapp.example",
@@ -153,6 +154,32 @@ def test_la_mediana_ignora_fijadas_y_exige_suelo():
     assert entero_vistas("1.2M") is None
     assert entero_vistas(None) is None
     assert entero_vistas("1200") == 1200
+    solo_fijada = [
+        Pieza("f", "https://www.tiktok.com/@app.estudio/photo/f", "app", 900_000, True, None, fijada=True),
+        *[
+            Pieza(str(i), f"https://www.tiktok.com/@app.estudio/photo/{i}", "app", 1_000, True, None)
+            for i in range(9)
+        ],
+    ]
+    excluida = evaluar(solo_fijada, bio="Download the app", handle="app.estudio")
+    assert excluida.estado == "descartada"
+    assert excluida.mediana_vistas == 1_000
+    assert excluida.num_piezas_virales == 0
+    assert "photo/f" not in excluida.piezas_virales
+    assert "no fijada" in excluida.motivo
+
+
+def test_is_top_marca_la_pieza_como_fijada():
+    item = _pieza(1, 10_000)
+    item["is_top"] = True
+    item["isPinned"] = False
+    embed = parsear_embed(_embed("app.estudio", [item, _pieza(2, 1_000)]), "app.estudio")
+    assert embed.piezas[0].fijada is True
+    assert embed.piezas[1].fijada is False
+    con_insignia = _pieza(3, 2_000)
+    con_insignia["pinBadge"] = {"icon": "pin"}
+    marcada = parsear_embed(_embed("app.estudio", [con_insignia]), "app.estudio")
+    assert marcada.piezas[0].fijada is True
 
 
 def test_no_califica_sin_producto_o_sin_slideshows():
@@ -257,7 +284,7 @@ def test_descubre_por_mencion_lista_y_para_si_bloquean(settings, tmp_path):
     assert cuenta["estado"] == "califica"
     assert cuenta["seguidores"] == 1200
     assert cuenta["mediana_vistas"] == 1000
-    assert cuenta["mejor_pieza_vistas"] == 800_000
+    assert cuenta["mejor_pieza_vistas"] == 80_000
     assert cuenta["nicho"] == "Estudio y educación"
     assert "REVISAR" in cuenta["clasificacion"]
     assert "studyapp.example" in cuenta["que_vende"]
@@ -304,7 +331,8 @@ def test_actualizar_conserva_la_revision_manual_y_la_fecha(settings, tmp_path):
     assert cuenta["clasificacion"].startswith("revisada a mano")
     assert cuenta["fecha_detectada"] == "2026-11-24"
     assert cuenta["seguidores"] == 1200
-    assert cuenta["mejor_pieza_vistas"] == 800_000
+    assert cuenta["mejor_pieza_vistas"] == 80_000
+    assert "fijado" not in (cuenta.get("piezas_virales") or "")
     from radar.tiktok.descubrir import hoy
 
     assert cuenta["fecha_actualizada"] == hoy()
@@ -443,7 +471,7 @@ def test_apify_sin_token_no_pide_nada_y_no_guarda_sus_vistas(monkeypatch, settin
     )
     assert informe.bloqueado is False
     cuenta = obtener_cuenta(db, "desde.apify")
-    assert cuenta["mejor_pieza_vistas"] == 800_000
+    assert cuenta["mejor_pieza_vistas"] == 80_000
     assert "999999" not in (cuenta.get("piezas_virales") or "")
 
 
@@ -566,7 +594,7 @@ def test_el_10221_se_explica_y_no_tira_un_embed_con_piezas(settings, tmp_path):
     leida = obtener_cuenta(db2, "app.estudio")
     assert leida["estado"] == "califica"
     assert leida["seguidores"] is None
-    assert leida["mejor_pieza_vistas"] == 800_000
+    assert leida["mejor_pieza_vistas"] == 80_000
     assert "10221" not in (leida["motivo"] or "")
 
 

@@ -259,6 +259,55 @@ CREATE TABLE IF NOT EXISTS ig_pasadas (
 CREATE INDEX IF NOT EXISTS idx_ig_creadores_estado ON ig_creadores(estado);
 CREATE INDEX IF NOT EXISTS idx_ig_creadores_subnicho ON ig_creadores(subnicho);
 CREATE INDEX IF NOT EXISTS idx_ig_creadores_idioma ON ig_creadores(idioma);
+
+CREATE TABLE IF NOT EXISTS gh_piezas (
+    id INTEGER PRIMARY KEY,
+    fuente TEXT NOT NULL,
+    url TEXT NOT NULL,
+    handle TEXT NOT NULL DEFAULT '',
+    nicho TEXT NOT NULL DEFAULT '',
+    subnicho TEXT NOT NULL DEFAULT '',
+    vistas INTEGER,
+    mediana INTEGER,
+    multiplo REAL,
+    fijada INTEGER NOT NULL DEFAULT 0,
+    caption TEXT NOT NULL DEFAULT '',
+    num_diapositivas INTEGER,
+    diapositivas_json TEXT NOT NULL DEFAULT '[]',
+    producto_indice INTEGER,
+    cta TEXT NOT NULL DEFAULT '',
+    transcripcion TEXT NOT NULL DEFAULT '',
+    texto_pantalla TEXT NOT NULL DEFAULT '',
+    gancho_texto TEXT NOT NULL DEFAULT '',
+    estado TEXT NOT NULL DEFAULT 'pendiente',
+    error TEXT NOT NULL DEFAULT '',
+    extraida_en TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(fuente, url)
+);
+
+CREATE TABLE IF NOT EXISTS gh_analisis (
+    pieza_id INTEGER PRIMARY KEY,
+    hook TEXT NOT NULL DEFAULT '',
+    hook_type TEXT NOT NULL DEFAULT '',
+    formato TEXT NOT NULL DEFAULT '',
+    estructura TEXT NOT NULL DEFAULT '',
+    insercion TEXT NOT NULL DEFAULT '',
+    angulo TEXT NOT NULL DEFAULT '',
+    por_que TEXT NOT NULL DEFAULT '',
+    plantilla TEXT NOT NULL DEFAULT '',
+    adaptacion TEXT NOT NULL DEFAULT '',
+    warnings_json TEXT NOT NULL DEFAULT '[]',
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    raw_json TEXT,
+    error TEXT NOT NULL DEFAULT '',
+    analizado_en TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY(pieza_id) REFERENCES gh_piezas(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gh_piezas_estado ON gh_piezas(estado);
+CREATE INDEX IF NOT EXISTS idx_gh_piezas_fuente ON gh_piezas(fuente);
 """
 
 

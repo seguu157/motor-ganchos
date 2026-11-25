@@ -113,6 +113,25 @@ def _fecha_de_id(item_id: str) -> str | None:
     return time.strftime("%Y-%m-%d", time.gmtime(segundos))
 
 
+def _marca_verdadera(valor) -> bool:
+    if valor is True or valor == 1:
+        return True
+    if isinstance(valor, str) and valor.strip().casefold() in {"1", "true", "yes", "sí", "si"}:
+        return True
+    return False
+
+
+def _esta_fijada(item: dict) -> bool:
+    """Marca de fijada que viene en el JSON: isPinned, is_top o la insignia."""
+    for clave in ("isPinned", "pinned", "is_top", "isTop", "is_pinned"):
+        if _marca_verdadera(item.get(clave)):
+            return True
+    for clave in ("pinBadge", "pinnedBadge", "pin_icon", "pinIcon"):
+        if item.get(clave):
+            return True
+    return False
+
+
 def _es_slideshow(cover: str, explicito) -> bool:
     if isinstance(explicito, bool):
         return explicito
@@ -148,7 +167,7 @@ def parsear_embed(html: str, handle: str) -> EmbedParseado:
         image_post = item.get("imagePost")
         if image_post is True or isinstance(image_post, dict):
             slideshow = True
-        fijada = bool(item.get("isPinned") or item.get("pinned"))
+        fijada = _esta_fijada(item)
         desc = str(item.get("desc") or "")
         plays = entero_vistas(item.get("playCount"))
         ruta = "photo" if slideshow else "video"

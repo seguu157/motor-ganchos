@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="back"><a href="/ganchos">Volver a los ganchos</a></p>
+<section class="page-head">
+  <p class="eyebrow">Ranking</p>
+  <h1>Formatos</h1>
+  <p class="lede">Cada cifra es la cuenta o la mediana del múltiplo de las piezas guardadas de ese grupo. Al lado va la URL de cada pieza.</p>
+</section>
+
+<h2>Por formato</h2>
+{% if formatos %}
+<ul class="steps">
+  {% for fila in formatos %}
+  <li>
+    <strong>{{ fila.etiqueta }}</strong>
+    · {{ fila.nicho or "Sin nicho" }}{% if fila.subnicho %} · {{ fila.subnicho }}{% endif %}
+    · {{ fila.n }} piezas · mediana {{ fila.mediana_multiplo|multiple }}
+    <ul>
+      {% for pieza in fila.piezas %}
+      <li><a href="{{ pieza.url }}" rel="noreferrer">{{ pieza.multiplo|multiple }} · @{{ pieza.handle }}</a></li>
+      {% endfor %}
+    </ul>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="fine">Todavía no hay formatos analizados.</p>
+{% endif %}
+
+<h2>Por tipo de gancho</h2>
+{% if ganchos_tipo %}
+<ul class="steps">
+  {% for fila in ganchos_tipo %}
+  <li>
+    <strong>{{ fila.etiqueta }}</strong>
+    · {{ fila.nicho or "Sin nicho" }}{% if fila.subnicho %} · {{ fila.subnicho }}{% endif %}
+    · {{ fila.n }} piezas · mediana {{ fila.mediana_multiplo|multiple }}
+    <ul>
+      {% for pieza in fila.piezas %}
+      <li><a href="{{ pieza.url }}" rel="noreferrer">{{ pieza.multiplo|multiple }} · @{{ pieza.handle }}</a></li>
+      {% endfor %}
+    </ul>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="fine">Todavía no hay tipos de gancho analizados.</p>
+{% endif %}
+{% endblock %}

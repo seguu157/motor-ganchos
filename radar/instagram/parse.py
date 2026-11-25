@@ -215,11 +215,18 @@ def _plays(nodo: dict) -> int | None:
 
 
 def _fijado(nodo: dict) -> bool:
-    if nodo.get("pinned") is True:
-        return True
-    for clave in ("timeline_pinned_user_ids", "clips_tab_pinned_user_ids"):
+    for clave in ("pinned", "is_pinned", "isPinned"):
+        valor = nodo.get(clave)
+        if valor is True or valor == 1:
+            return True
+        if isinstance(valor, str) and valor.strip().casefold() in {"1", "true", "yes", "sí", "si"}:
+            return True
+    for clave in ("timeline_pinned_user_ids", "clips_tab_pinned_user_ids", "pinned_for_users"):
         valor = nodo.get(clave)
         if isinstance(valor, list) and len(valor) > 0:
+            return True
+    for clave in ("pin_icon", "pinIcon", "pinned_badge"):
+        if nodo.get(clave):
             return True
     return False
 
