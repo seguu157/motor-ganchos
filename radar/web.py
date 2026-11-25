@@ -610,6 +610,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return RedirectResponse("/instagram?aviso=Semilla+guardada.", status_code=303)
 
+    @app.get("/ganchos", response_class=HTMLResponse)
+    def ganchos(request: Request) -> HTMLResponse:
+        from radar.ganchos.store import listar, valores
+
+        multiplo = _decimal_param(request.query_params.get("multiplo"))
+        filtros = {
+            "fuente": request.query_params.get("fuente") or "",
+            "nicho": request.query_params.get("nicho") or "",
+            "tipo": request.query_params.get("tipo") or "",
+            "formato": request.query_params.get("formato") or "",
+            "multiplo": request.query_params.get("multiplo") or "",
+        }
+        return render(
+            "ganchos.html",
+            nav="ganchos",
+            title="Ganchos y formatos",
+            piezas=listar(
+                db,
+                fuente=filtros["fuente"] or None,
+                nicho=filtros["nicho"] or None,
+                hook_type=filtros["tipo"] or None,
+                formato=filtros["formato"] or None,
+                min_multiplo=multiplo,
+            ),
+            nichos=valores(db, "nicho"),
+            tipos=valores(db, "hook_type"),
+            formatos=valores(db, "formato"),
+            filtros=filtros,
+        )
+
+    @app.get("/ganchos/formatos", response_class=HTMLResponse)
+    def ganchos_formatos() -> HTMLResponse:
+        from radar.ganchos.agregar import rankings
+        from radar.ganchos.store import listar
+
+        piezas = listar(db)
+        return render(
+            "ganchos_formatos.html",
+            nav="ganchos",
+            title="Formatos",
+            formatos=rankings(piezas, "formato"),
+            ganchos_tipo=rankings(piezas, "hook_type"),
+        )
+
     @app.get("/ajustes", response_class=HTMLResponse)
     def ajustes() -> HTMLResponse:
         tube = TubeAlfredAdapter(settings.tubealfred_api_key)
@@ -729,13 +773,21 @@ def _vistas_param(value) -> int | None:
 
 
 def _piezas_virales(texto: str) -> list[dict[str, str]]:
+    import re
+
     piezas = []
     for trozo in (texto or "").split(" ; "):
         limpio = trozo.strip()
         if not limpio:
             continue
         url, _, resto = limpio.partition(" | ")
-        piezas.append({"url": url.strip(), "resto": resto.strip()})
+        piezas.append(
+            {
+                "url": url.strip(),
+                "resto": resto.strip(),
+                "fijada": bool(re.search(r"(?:^|\|)\s*fijad", resto, re.I)),
+            }
+        )
     return piezas
 
 

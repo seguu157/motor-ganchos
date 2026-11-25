@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">Biblioteca</p>
+  <h1>Ganchos y formatos</h1>
+  <p class="lede">Salen de las piezas virales no fijadas de TikTok e Instagram. El múltiplo y las vistas son los que ya guardó el radar. La adaptación es una sugerencia para el perfil, no un dato de la pieza.</p>
+</section>
+
+<p class="fine">Se llena desde la terminal: <code>radar ganchos extraer --fuente todas --yes</code> y <code>radar ganchos analizar --yes</code>. Las fijadas no entran.</p>
+
+<form class="filters" method="get" action="/ganchos">
+  <label>Fuente
+    <select name="fuente">
+      <option value="">Todas</option>
+      {% for nombre in ("tiktok", "instagram") %}
+      <option value="{{ nombre }}" {% if filtros.get('fuente') == nombre %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Nicho
+    <select name="nicho">
+      <option value="">Todos</option>
+      {% for nombre in nichos %}
+      <option value="{{ nombre }}" {% if filtros.get('nicho') == nombre %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Tipo de gancho
+    <select name="tipo">
+      <option value="">Todos</option>
+      {% for nombre in tipos %}
+      <option value="{{ nombre }}" {% if filtros.get('tipo') == nombre %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Formato
+    <select name="formato">
+      <option value="">Todos</option>
+      {% for nombre in formatos %}
+      <option value="{{ nombre }}" {% if filtros.get('formato') == nombre %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Múltiplo mínimo
+    <input name="multiplo" inputmode="decimal" value="{{ filtros.get('multiplo', '') }}" placeholder="2">
+  </label>
+  <button type="submit">Filtrar</button>
+</form>
+
+<p class="export-row"><span>{{ piezas|length }} en este filtro</span> <a href="/ganchos/formatos">Ver formatos</a></p>
+
+<ul class="account-list">
+  {% for pieza in piezas %}
+  <li>
+    <div>
+      <a class="account" href="{{ pieza.url }}" rel="noreferrer">@{{ pieza.handle }}</a>
+      <span class="chip">{{ pieza.fuente }}</span>
+      {% if pieza.nicho %}<span class="chip quiet">{{ pieza.nicho }}</span>{% endif %}
+      {% if pieza.formato %}<span class="chip">{{ pieza.formato }}</span>{% endif %}
+      {% if pieza.hook_type %}<span class="chip quiet">{{ pieza.hook_type }}</span>{% endif %}
+      <p>{{ pieza.hook or pieza.gancho_texto or "Pendiente de análisis" }}</p>
+      <p class="fine">{{ pieza.vistas|es_int }} {% if pieza.fuente == "instagram" %}reproducciones{% else %}vistas{% endif %} · mediana {{ pieza.mediana|es_int }} · {{ pieza.multiplo|multiple }}{% if pieza.num_diapositivas %} · {{ pieza.num_diapositivas }} diapositivas{% endif %}{% if pieza.producto_indice %} · producto en la {{ pieza.producto_indice }}{% endif %}</p>
+      {% if pieza.plantilla %}<p>{{ pieza.plantilla }}</p>{% endif %}
+      {% if pieza.adaptacion %}<p class="fine">{{ pieza.adaptacion }}</p>{% endif %}
+    </div>
+  </li>
+  {% else %}
+  <li class="empty">No hay ganchos con esos filtros. <code>radar ganchos extraer --yes</code> lee las piezas virales que no están fijadas.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

@@ -134,11 +134,21 @@ def test_la_mediana_usa_hasta_20_recientes_y_exige_suelo():
     assert resultado.reels_muestreados == 20
     assert resultado.mediana_vistas == 10_000
     assert resultado.tiene_viral is True
-    assert resultado.num_piezas_virales == 2
+    assert resultado.num_piezas_virales == 1
     assert resultado.num_virales_no_fijadas == 1
-    assert resultado.mejor_pieza_vistas == 2_000_000
-    assert resultado.mejor_pieza_fijada == "sí"
+    assert resultado.mejor_pieza_vistas == 80_000
+    assert resultado.mejor_pieza_fijada == "no"
+    assert "PIN" not in resultado.piezas_virales
     assert "OLD" not in resultado.piezas_virales
+    solo_fijado = evaluar(
+        [_reel("PIN", 2_000_000, fijado=True), _reel("A", 10_000), _reel("B", 12_000)],
+        bio="Herramientas de IA",
+        handle="creador.ia",
+    )
+    assert solo_fijado.tiene_viral is False
+    assert solo_fijado.mediana_vistas == 11_000
+    assert "PIN" not in solo_fijado.piezas_virales
+    assert "no fijado" in solo_fijado.motivo
     assert "SIN" not in resultado.piezas_virales
     bajo = evaluar(
         [_reel(str(indice), 40_000 if indice == 0 else 10_000, taken=f"2026-01-{indice + 1:02d}") for indice in range(10)],
@@ -203,6 +213,11 @@ def test_parsea_la_ficha_sin_inventar_reproducciones_ni_meter_al_viewer():
     assert set(codes) == {"AAA111", "BBB222"}
     assert codes["AAA111"].plays == 80_000
     assert codes["AAA111"].fijado is True
+    por_usuarios = parsear_blobs(
+        [{"code": "FFF666", "product_type": "clips", "play_count": 10, "pinned_for_users": ["1"], "user": {"username": "creador.ia"}}],
+        "creador.ia",
+    )
+    assert por_usuarios.reels[0].fijado is True
     assert codes["BBB222"].plays is None
     assert lectura.colaboradores == ["colab.ia"]
     assert handles_en_html(

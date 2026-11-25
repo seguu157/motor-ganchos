@@ -1,8 +1,9 @@
 """Viralidad de reels y señales de nicho.
 
 La mediana sale de hasta 20 reels recientes no fijados que traen
-reproducciones. Un reel es viral si llega al doble de esa mediana y, además,
-a un suelo absoluto. La cuenta pasa si hay al menos uno y el texto es de IA.
+reproducciones. Un reel es viral si no está fijado, llega al doble de esa
+mediana y, además, a un suelo absoluto. Un fijado no cuenta como viral ni
+puede ser la mejor pieza. La cuenta pasa si hay al menos uno y el texto es de IA.
 """
 
 from __future__ import annotations
@@ -195,7 +196,7 @@ def evaluar(
     muestra = _recientes(con_plays, recientes)
     plays = [reel.plays for reel in muestra if reel.plays is not None]
     mediana = float(statistics.median(plays)) if plays else None
-    universo = [*muestra, *fijados]
+    universo = list(muestra)
     for reel in universo:
         if mediana and reel.plays is not None and mediana > 0:
             reel.multiplo = round(reel.plays / mediana, 1)
@@ -210,7 +211,6 @@ def evaluar(
         and reel.plays >= umbral * mediana
         and reel.plays >= vistas_minimas
     ]
-    # Un fijado puede estar también en la muestra si el llamador no lo separó.
     vistos: set[str] = set()
     unicos: list[Reel] = []
     for reel in virales:
@@ -225,11 +225,14 @@ def evaluar(
     elif not unicos:
         solo_multiplo = [
             reel
-            for reel in universo
+            for reel in muestra
             if reel.plays is not None and mediana > 0 and reel.plays >= umbral * mediana
         ]
         if not solo_multiplo:
-            motivo = "ningún reel ≥2× mediana"
+            hay_fijado = any(
+                reel.plays is not None and mediana > 0 and reel.plays >= umbral * mediana for reel in fijados
+            )
+            motivo = "ningún reel no fijado ≥2× mediana" if hay_fijado else "ningún reel ≥2× mediana"
         else:
             tope = max(reel.plays or 0 for reel in solo_multiplo)
             motivo = f"reels ≥2× pero alcance bajo (máx {tope:,} < {vistas_minimas:,})"

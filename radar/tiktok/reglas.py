@@ -1,9 +1,11 @@
 """Reglas de viralidad, slideshow y «vende algo».
 
 La mediana sale de las publicaciones recientes del embed (las fijadas no
-entran). Una pieza es viral si sus vistas son al menos el doble de esa
-mediana y, además, llegan a un suelo absoluto. La cuenta pasa si vende algo
-visible, al menos la mitad de la muestra es slideshow y hay una pieza viral.
+entran). Una pieza es viral solo si no está fijada, sus vistas son al menos
+el doble de esa mediana y, además, llegan a un suelo absoluto. Una fijada no
+cuenta como viral ni puede ser la mejor pieza. La cuenta pasa si vende algo
+visible, al menos la mitad de la muestra es slideshow y hay una pieza viral
+no fijada.
 """
 
 from __future__ import annotations
@@ -316,9 +318,10 @@ def evaluar(
     slides = sum(1 for pieza in piezas if pieza.slideshow)
     n = len(piezas)
     ratio = slides / n
+    sueltas = [pieza for pieza in piezas if not pieza.fijada]
     virales = [
         pieza
-        for pieza in piezas
+        for pieza in sueltas
         if pieza.plays is not None
         and mediana is not None
         and mediana > 0
@@ -326,7 +329,7 @@ def evaluar(
         and pieza.plays >= vistas_minimas
     ]
     virales.sort(key=lambda pieza: pieza.plays or 0, reverse=True)
-    no_fijadas = [pieza for pieza in virales if not pieza.fijada]
+    no_fijadas = virales
     razones: list[str] = []
     if not tipo or tipo == "enlace sin producto claro":
         razones.append("no vende nada visible (bio sin app/tienda/producto)")
@@ -335,7 +338,7 @@ def evaluar(
     if not virales:
         solo_multiplo = [
             pieza
-            for pieza in piezas
+            for pieza in sueltas
             if pieza.plays is not None
             and mediana is not None
             and mediana > 0
@@ -344,7 +347,18 @@ def evaluar(
         if not plays or mediana is None or mediana <= 0:
             razones.append("sin vistas en la muestra reciente")
         elif not solo_multiplo:
-            razones.append("ninguna pieza ≥2× mediana")
+            hay_fijada = any(
+                pieza.fijada
+                and pieza.plays is not None
+                and mediana is not None
+                and mediana > 0
+                and pieza.plays >= umbral * mediana
+                for pieza in piezas
+            )
+            if hay_fijada:
+                razones.append("ninguna pieza no fijada ≥2× mediana")
+            else:
+                razones.append("ninguna pieza ≥2× mediana")
         else:
             tope = max(pieza.plays or 0 for pieza in solo_multiplo)
             razones.append(

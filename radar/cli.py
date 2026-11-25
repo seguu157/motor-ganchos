@@ -219,6 +219,26 @@ def main(argv: list[str] | None = None) -> int:
     ig_semilla.add_argument("--tipo", default=None, choices=("keyword", "handle", "hashtag", "url"))
     creadores_sub.add_parser("semillas", help="Lista las semillas activas")
 
+    ganchos = sub.add_parser("ganchos", help="Biblioteca de ganchos y formatos de las piezas virales")
+    ganchos_sub = ganchos.add_subparsers(dest="ganchos_command", required=True)
+    gh_extraer = ganchos_sub.add_parser("extraer", help="Lee slideshows y reels virales. Sin --yes no hay red")
+    gh_extraer.add_argument("--fuente", choices=("tiktok", "instagram", "todas"), default="todas")
+    gh_extraer.add_argument("--max", type=int, default=None, help="Piezas a leer en esta pasada")
+    gh_extraer.add_argument("--yes", action="store_true", help="Lee las piezas. Sin esto solo enseña el plan")
+    gh_analizar = ganchos_sub.add_parser("analizar", help="Pide el gancho y el formato. Sin --yes no llama al modelo")
+    gh_analizar.add_argument("--max", type=int, default=None)
+    gh_analizar.add_argument("--yes", action="store_true")
+    gh_exportar = ganchos_sub.add_parser("exportar", help="Markdown y CSV de la biblioteca")
+    gh_exportar.add_argument("--out", default="-")
+    gh_ciclo = ganchos_sub.add_parser("ciclo", help="Extrae y, si no hay bloqueo, analiza")
+    gh_ciclo.add_argument("--fuente", choices=("tiktok", "instagram", "todas"), default="todas")
+    gh_ciclo.add_argument("--max", type=int, default=None)
+    gh_ciclo.add_argument("--yes", action="store_true")
+    gh_programar = ganchos_sub.add_parser("programar", help="Comando del Programador de tareas de Windows")
+    gh_programar.add_argument("--hora", default="09:00")
+    gh_programar.add_argument("--tarea", default="RadarGanchos")
+    gh_programar.add_argument("--instalar", action="store_true", help="En Windows, registra la tarea")
+
     accounts = sub.add_parser("accounts", help="Watchlist de cuentas")
     account_sub = accounts.add_subparsers(dest="account_command", required=True)
     account_sub.add_parser("list")
@@ -268,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cuentas(db, settings, args)
         if args.command == "creadores":
             return _creadores(db, settings, args)
+        if args.command == "ganchos":
+            return _ganchos(db, settings, args)
     except (
         MissingApifyToken,
         OverBudget,
@@ -724,6 +746,54 @@ def _creadores(db: Database, settings, args) -> int:
         )
     print(informe.mensaje)
     if informe.status == "error":
+        return 2
+    return 0
+
+
+def _ganchos(db: Database, settings, args) -> int:
+    from radar.ganchos.analizar import analizar
+    from radar.ganchos.exportar import exportar, render_markdown
+    from radar.ganchos.extraer import ejecutar
+    from radar.ganchos.programar import instalar_tarea, preparar_tarea
+    from radar.ganchos.store import listar
+
+    if args.ganchos_command == "exportar":
+        if args.out == "-":
+            sys.stdout.write(render_markdown(listar(db)))
+            return 0
+        md, csv_path = exportar(db, args.out)
+        print(f"Escrito {md}")
+        print(f"Escrito {csv_path}")
+        return 0
+    if args.ganchos_command == "programar":
+        programa = preparar_tarea(hora=args.hora, tarea=args.tarea)
+        print(programa.script)
+        print(programa.comando)
+        if args.instalar:
+            print(instalar_tarea(programa))
+        return 0
+    if args.ganchos_command == "analizar":
+        informe = analizar(db, settings, permitir=args.yes, maximo=args.max)
+        print(informe.mensaje)
+        if informe.status in {"error", "parado"}:
+            return 2
+        return 0
+    fuente = args.fuente
+    maximo = args.max
+    permitir = args.yes
+    informe = ejecutar(db, settings, fuente=fuente, maximo=maximo, permitir_red=permitir)
+    print(informe.mensaje)
+    if args.ganchos_command == "ciclo":
+        if informe.status == "plan":
+            analisis = analizar(db, settings, permitir=False, maximo=maximo)
+            print(analisis.mensaje)
+            return 0
+        analisis = analizar(db, settings, permitir=permitir, maximo=maximo)
+        print(analisis.mensaje)
+        if informe.bloqueado or informe.status == "error" or analisis.status in {"error", "parado"}:
+            return 2
+        return 0
+    if informe.bloqueado or informe.status == "error":
         return 2
     return 0
 

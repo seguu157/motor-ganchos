@@ -153,6 +153,14 @@ class PlaywrightSesion(Sesion):
                 vistos.append(handle)
         return vistos
 
+    def leer_url(self, url: str) -> tuple[list, str]:
+        """Abre una URL de reel con la misma sesión y las mismas paradas."""
+        blobs, status, final, text, statuses = self._abrir(url, scrolls=1)
+        codigo = codigo_de_pagina(status=status, url=final, text=text, statuses=statuses)
+        if codigo and codigo != "privada":
+            raise InstagramBloqueado(mensaje_parada(codigo))
+        return blobs, text
+
     def _abrir(self, url: str, *, scrolls: int) -> tuple[list, int | None, str, str, list[int]]:
         self._ensure()
         page = self._context.new_page()

@@ -32,13 +32,24 @@
   <p class="fine">{{ cuenta.clasificacion }}</p>
   <p class="fine">{{ cuenta.fuente }}</p>
   <p class="fine">Semilla: {{ cuenta.semilla or "—" }}</p>
-  {% if cuenta.piezas_virales %}
-  <h2>Reels virales leídos</h2>
+  {% if piezas %}
+  <h2>Reels virales no fijados</h2>
   <ul class="steps">
-    {% for pieza in piezas %}
+    {% for pieza in piezas if not pieza.fijada %}
+    <li><a href="{{ pieza.url }}" rel="noreferrer">{{ pieza.resto or pieza.url }}</a></li>
+    {% else %}
+    <li>No hay ningún viral que no esté fijado.</li>
+    {% endfor %}
+  </ul>
+  {% set fijadas = piezas|selectattr('fijada')|list %}
+  {% if fijadas %}
+  <h2>Fijados, no cuentan</h2>
+  <ul class="steps">
+    {% for pieza in fijadas %}
     <li><a href="{{ pieza.url }}" rel="noreferrer">{{ pieza.resto or pieza.url }}</a></li>
     {% endfor %}
   </ul>
+  {% endif %}
   {% endif %}
 </article>
 {% endblock %}

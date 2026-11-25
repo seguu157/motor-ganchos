@@ -103,6 +103,9 @@ class Lector:
         self._pausa_429 = pausa_429
         self._reintento_429 = False
 
+    def leer(self, url: str) -> Respuesta:
+        return self._leer(url)
+
     def _leer(self, url: str) -> Respuesta:
         respuesta = self.transporte.get(url)
         if respuesta.status == 429 and not self._reintento_429:
