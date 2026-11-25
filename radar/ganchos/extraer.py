@@ -10,7 +10,7 @@ from pathlib import Path
 from radar.carrusel import descargar_imagen, url_de_imagen_permitida
 from radar.config import Settings
 from radar.db import Database, utc_now
-from radar.ganchos.fotos import aplicar_ocr, leer_slideshow, pistas_de_producto
+from radar.ganchos.fotos import aplicar_ocr, html_con_navegador, leer_slideshow, pistas_de_producto
 from radar.ganchos.ig import PlaywrightLectorReel, ReelCrudo
 from radar.ganchos.piezas import Candidata, candidatas_de_cuentas
 from radar.ganchos.store import guardar_pieza, obtener_por_url
@@ -32,8 +32,15 @@ class Informe:
     avisos: list[str] = field(default_factory=list)
 
 
-def planificar(db: Database, fuente: str, maximo: int | None, settings: Settings) -> tuple[list[Candidata], list[Candidata], str]:
-    cola, fijadas = _cola(db, fuente, maximo, settings)
+def planificar(
+    db: Database,
+    fuente: str,
+    maximo: int | None,
+    settings: Settings,
+    *,
+    reintentar: bool = False,
+) -> tuple[list[Candidata], list[Candidata], str]:
+    cola, fijadas = _cola(db, fuente, maximo, settings, reintentar=reintentar)
     lineas = [
         f"Piezas a leer: {len(cola)}. Fijadas que no se leen: {len(fijadas)}.",
         "Sin --yes no hay ninguna petición.",
@@ -61,10 +68,12 @@ def ejecutar(
     descargar=None,
     dormir=None,
     rng: random.Random | None = None,
+    reintentar: bool = False,
+    navegador=None,
 ) -> Informe:
     if fuente not in {"tiktok", "instagram", "todas"}:
         raise ValueError("La fuente tiene que ser tiktok, instagram o todas.")
-    cola, fijadas, texto = planificar(db, fuente, maximo, settings)
+    cola, fijadas, texto = planificar(db, fuente, maximo, settings, reintentar=reintentar)
     if not permitir_red:
         return Informe(status="plan", mensaje=texto, omitidas=len(fijadas))
     azar = rng or random.Random()
@@ -83,7 +92,7 @@ def ejecutar(
             _guardar_omitida(db, candidata)
         for indice, candidata in enumerate(cola):
             previa = obtener_por_url(db, candidata.fuente, candidata.url)
-            if previa and previa.get("estado") == "extraida":
+            if not reintentar and previa and _completa(previa):
                 continue
             if candidata.fuente == "instagram" and leer_instagram is None and not settings.browser_ready:
                 if not any("navegador" in aviso for aviso in avisos):
@@ -97,9 +106,23 @@ def ejecutar(
                     if leer_tiktok is None:
                         if lector is None:
                             lector = Lector(HttpxTransporte(), dormir=espera, rng=azar)
-                        _extraer_tiktok(db, candidata, lector, settings, motor, bajar, azar, espera)
+                        estado, aviso = _extraer_tiktok(
+                            db,
+                            candidata,
+                            lector,
+                            settings,
+                            motor,
+                            bajar,
+                            azar,
+                            espera,
+                            navegador=html_con_navegador if navegador is None else navegador,
+                        )
                     else:
-                        _extraer_tiktok_inyectado(db, candidata, leer_tiktok, motor, bajar)
+                        estado, aviso = _extraer_tiktok_inyectado(db, candidata, leer_tiktok, motor, bajar)
+                    if estado != "extraida":
+                        fallos += 1
+                        cuenta_como_leida = False
+                        avisos.append(f"{candidata.url}: {aviso}")
                 else:
                     if leer_instagram is None:
                         if sesion is None:
@@ -134,9 +157,11 @@ def ejecutar(
             lector.transporte.close()
         if sesion is not None:
             sesion.close()
+    lineas = [f"Leídas {hechas}. Fijadas omitidas: {len(fijadas)}. Errores: {fallos}."]
+    lineas.extend(avisos)
     return Informe(
         status="ok",
-        mensaje=f"Leídas {hechas}. Fijadas omitidas: {len(fijadas)}. Errores: {fallos}.",
+        mensaje="\n".join(lineas),
         leidas=hechas,
         omitidas=len(fijadas),
         errores=fallos,
@@ -144,14 +169,21 @@ def ejecutar(
     )
 
 
-def _cola(db: Database, fuente: str, maximo: int | None, settings: Settings) -> tuple[list[Candidata], list[Candidata]]:
+def _cola(
+    db: Database,
+    fuente: str,
+    maximo: int | None,
+    settings: Settings,
+    *,
+    reintentar: bool = False,
+) -> tuple[list[Candidata], list[Candidata]]:
     fuentes = ("tiktok", "instagram") if fuente == "todas" else (fuente,)
     todas: list[Candidata] = []
     for nombre in fuentes:
         cuentas = _cuentas(db, nombre)
         todas.extend(candidatas_de_cuentas(cuentas, fuente=nombre))
     todas.sort(key=lambda pieza: (-(pieza.multiplo if pieza.multiplo is not None else -1), -(pieza.vistas or -1), pieza.url))
-    hechas = _ya_extraidas(db)
+    hechas = set() if reintentar else _ya_extraidas(db)
     fijadas = [pieza for pieza in todas if pieza.fijada]
     sueltas = [pieza for pieza in todas if not pieza.fijada and (pieza.fuente, pieza.url) not in hechas]
     if maximo is None:
@@ -174,9 +206,27 @@ def _cola(db: Database, fuente: str, maximo: int | None, settings: Settings) -> 
     return sueltas[: max(maximo, 0)], fijadas
 
 
+def _completa(pieza: dict) -> bool:
+    if pieza.get("estado") != "extraida":
+        return False
+    if pieza.get("fuente") == "tiktok":
+        return bool(pieza.get("num_diapositivas")) and bool(str(pieza.get("gancho_texto") or "").strip())
+    return bool(pieza.get("gancho_texto") or pieza.get("transcripcion") or pieza.get("texto_pantalla"))
+
+
 def _ya_extraidas(db: Database) -> set[tuple[str, str]]:
+    """Una TikTok sin diapositivas o sin texto no cuenta: se vuelve a leer."""
     with db.connect() as conn:
-        filas = conn.execute("SELECT fuente, url FROM gh_piezas WHERE estado = 'extraida'").fetchall()
+        filas = conn.execute(
+            """
+            SELECT fuente, url FROM gh_piezas
+            WHERE estado = 'extraida'
+              AND (
+                (fuente = 'tiktok' AND COALESCE(num_diapositivas, 0) > 0 AND gancho_texto != '')
+                OR (fuente != 'tiktok' AND (gancho_texto != '' OR transcripcion != '' OR texto_pantalla != ''))
+              )
+            """
+        ).fetchall()
     return {(fila["fuente"], fila["url"]) for fila in filas}
 
 
@@ -190,18 +240,21 @@ def _cuentas(db: Database, fuente: str) -> list[dict]:
     return listar_cuentas(db, estado="califica")
 
 
-def _extraer_tiktok(db, candidata: Candidata, lector: Lector, settings: Settings, ocr, descargar, rng, dormir) -> None:
-    lectura = leer_slideshow(lector, candidata.url, pausa=settings.tt_pause, dormir=dormir, rng=rng)
-    with tempfile.TemporaryDirectory(prefix="radar-gh-") as carpeta:
-        diapositivas, producto, cta, aviso = aplicar_ocr(
-            lectura,
-            ocr=ocr,
-            descargar=descargar,
-            workdir=Path(carpeta),
-            pistas=pistas_de_producto(candidata.que_vende, candidata.enlace),
-        )
+def _resultado_tiktok(lectura, diapositivas: list[dict], aviso: str) -> tuple[str, str, str]:
     gancho = next((item["texto"] for item in diapositivas if item.get("texto")), "")
-    estado = "extraida" if (gancho or lectura.caption or diapositivas) else "error"
+    if not diapositivas:
+        return "error", "", aviso or lectura.error or "Sin imágenes públicas del slideshow. Queda pendiente."
+    if not gancho:
+        return (
+            "error",
+            "",
+            "El OCR no leyó texto en las diapositivas. No se inventa el gancho. Queda pendiente.",
+        )
+    return "extraida", gancho, aviso
+
+
+def _guardar_lectura_tiktok(db, candidata: Candidata, lectura, diapositivas, producto, cta, aviso: str) -> tuple[str, str]:
+    estado, gancho, aviso_final = _resultado_tiktok(lectura, diapositivas, aviso)
     guardar_pieza(
         db,
         {
@@ -214,20 +267,41 @@ def _extraer_tiktok(db, candidata: Candidata, lector: Lector, settings: Settings
             "mediana": candidata.mediana,
             "multiplo": candidata.multiplo,
             "fijada": False,
-            "caption": lectura.caption,
+            "caption": getattr(lectura, "caption", "") or "",
             "num_diapositivas": len(diapositivas),
             "diapositivas": diapositivas,
             "producto_indice": producto,
             "cta": cta,
             "gancho_texto": gancho,
             "estado": estado,
-            "error": aviso or lectura.error,
+            "error": "" if estado == "extraida" else aviso_final,
             "extraida_en": utc_now() if estado == "extraida" else "",
         },
     )
+    return estado, aviso_final
 
 
-def _extraer_tiktok_inyectado(db, candidata: Candidata, leer, ocr, descargar) -> None:
+def _extraer_tiktok(db, candidata, lector, settings, ocr, descargar, rng, dormir, navegador=None) -> tuple[str, str]:
+    lectura = leer_slideshow(
+        lector,
+        candidata.url,
+        pausa=settings.tt_pause,
+        dormir=dormir,
+        rng=rng,
+        navegador=navegador,
+    )
+    with tempfile.TemporaryDirectory(prefix="radar-gh-") as carpeta:
+        diapositivas, producto, cta, aviso = aplicar_ocr(
+            lectura,
+            ocr=ocr,
+            descargar=descargar,
+            workdir=Path(carpeta),
+            pistas=pistas_de_producto(candidata.que_vende, candidata.enlace),
+        )
+    return _guardar_lectura_tiktok(db, candidata, lectura, diapositivas, producto, cta, aviso)
+
+
+def _extraer_tiktok_inyectado(db, candidata: Candidata, leer, ocr, descargar) -> tuple[str, str]:
     """El test devuelve una LecturaFoto. El OCR sigue siendo el de la app."""
     lectura = leer(candidata.url)
     with tempfile.TemporaryDirectory(prefix="radar-gh-") as carpeta:
@@ -238,29 +312,7 @@ def _extraer_tiktok_inyectado(db, candidata: Candidata, leer, ocr, descargar) ->
             workdir=Path(carpeta),
             pistas=pistas_de_producto(candidata.que_vende, candidata.enlace),
         )
-    gancho = next((item["texto"] for item in diapositivas if item.get("texto")), "")
-    guardar_pieza(
-        db,
-        {
-            "fuente": "tiktok",
-            "url": candidata.url,
-            "handle": candidata.handle,
-            "nicho": candidata.nicho,
-            "subnicho": candidata.subnicho,
-            "vistas": candidata.vistas,
-            "mediana": candidata.mediana,
-            "multiplo": candidata.multiplo,
-            "caption": getattr(lectura, "caption", "") or "",
-            "num_diapositivas": len(diapositivas),
-            "diapositivas": diapositivas,
-            "producto_indice": producto,
-            "cta": cta,
-            "gancho_texto": gancho,
-            "estado": "extraida",
-            "error": aviso,
-            "extraida_en": utc_now(),
-        },
-    )
+    return _guardar_lectura_tiktok(db, candidata, lectura, diapositivas, producto, cta, aviso)
 
 
 def _guardar_reel(db, settings: Settings, candidata: Candidata, crudo: ReelCrudo, ocr, descargar, transcribir) -> None:

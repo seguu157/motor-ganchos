@@ -225,6 +225,11 @@ def main(argv: list[str] | None = None) -> int:
     gh_extraer.add_argument("--fuente", choices=("tiktok", "instagram", "todas"), default="todas")
     gh_extraer.add_argument("--max", type=int, default=None, help="Piezas a leer en esta pasada")
     gh_extraer.add_argument("--yes", action="store_true", help="Lee las piezas. Sin esto solo enseña el plan")
+    gh_extraer.add_argument(
+        "--reintentar",
+        action="store_true",
+        help="Vuelve a leer también las que ya tienen texto. Las vacías se reintentan solas",
+    )
     gh_analizar = ganchos_sub.add_parser("analizar", help="Pide el gancho y el formato. Sin --yes no llama al modelo")
     gh_analizar.add_argument("--max", type=int, default=None)
     gh_analizar.add_argument("--yes", action="store_true")
@@ -234,6 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     gh_ciclo.add_argument("--fuente", choices=("tiktok", "instagram", "todas"), default="todas")
     gh_ciclo.add_argument("--max", type=int, default=None)
     gh_ciclo.add_argument("--yes", action="store_true")
+    gh_ciclo.add_argument("--reintentar", action="store_true", help="Vuelve a leer piezas que ya tenían texto")
     gh_programar = ganchos_sub.add_parser("programar", help="Comando del Programador de tareas de Windows")
     gh_programar.add_argument("--hora", default="09:00")
     gh_programar.add_argument("--tarea", default="RadarGanchos")
@@ -781,7 +787,14 @@ def _ganchos(db: Database, settings, args) -> int:
     fuente = args.fuente
     maximo = args.max
     permitir = args.yes
-    informe = ejecutar(db, settings, fuente=fuente, maximo=maximo, permitir_red=permitir)
+    informe = ejecutar(
+        db,
+        settings,
+        fuente=fuente,
+        maximo=maximo,
+        permitir_red=permitir,
+        reintentar=bool(getattr(args, "reintentar", False)),
+    )
     print(informe.mensaje)
     if args.ganchos_command == "ciclo":
         if informe.status == "plan":

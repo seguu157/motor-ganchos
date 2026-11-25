@@ -169,6 +169,44 @@ def test_la_mediana_ignora_fijadas_y_exige_suelo():
     assert "no fijada" in excluida.motivo
 
 
+def test_un_prefijo_mas_viejo_no_entra_en_la_mediana_ni_es_viral():
+    """Tres publicaciones viejas delante de un bloque reciente: son fijadas.
+
+    El múltiplo de millones contra una mediana de miles salía de contar
+    esas tres como recientes. El embed no manda isPinned.
+    """
+
+    def nieve(segundos: int, n: int = 1) -> str:
+        return str((segundos << 32) + n)
+
+    # El orden y las vistas salen del embed de @my.neral leído el 25 nov 2026.
+    crudas = [
+        (1755582516, 1_400_000),
+        (1742413156, 3_300_000),
+        (1731050416, 4_100_000),
+        (1793942678, 1_787),
+        (1793839353, 3_145),
+        (1791441682, 1_328),
+        (1789963807, 1_387),
+        (1785210584, 1_484),
+        (1785124084, 11_200),
+        (1784865746, 2_075),
+        (1784778765, 2_046),
+        (1784675302, 9_978),
+    ]
+    piezas = [
+        Pieza(nieve(segundos, indice), f"https://www.tiktok.com/@my.neral/photo/{indice}", "app", plays, True, None)
+        for indice, (segundos, plays) in enumerate(crudas)
+    ]
+    resultado = evaluar(piezas, bio="Download the app", enlace="https://studyapp.example", handle="my.neral")
+    assert resultado.fijados == 3
+    assert resultado.mediana_vistas == 2_046
+    assert "photo/2" not in resultado.piezas_virales
+    assert resultado.mejor_pieza_vistas is None
+    assert resultado.estado == "descartada"
+    assert "máx 11,200" in resultado.motivo
+
+
 def test_is_top_marca_la_pieza_como_fijada():
     item = _pieza(1, 10_000)
     item["is_top"] = True

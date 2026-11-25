@@ -16,7 +16,7 @@ _SCRIPT_JSON = re.compile(
     r'<script[^>]*type="application/json"[^>]*>(.*?)</script>',
     re.S,
 )
-_HOSTS = ("tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com")
+_HOSTS = ("tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "byteimg.com", "ibyteimg.com", "muscdn.com")
 _CTA = re.compile(
     r"link in (?:my |the )?bio|enlace en (?:la |mi )?bio|descarg\w*|download|"
     r"comenta\w*|comment|s[ií]gueme|follow|shop now|compra|app store|play store|"
@@ -52,6 +52,21 @@ def url_oembed(url: str) -> str:
 def url_embed_pieza(url: str) -> str:
     pieza = id_de_url(url)
     return f"https://www.tiktok.com/embed/v2/{pieza}" if pieza else url
+
+
+def url_movil(url: str) -> str:
+    """La ficha de móvil trae imagePost en el HTML. La de escritorio, no."""
+    pieza = id_de_url(url)
+    return f"https://m.tiktok.com/v/{pieza}.html" if pieza else url
+
+
+def fuentes_publicas(url: str) -> list[tuple[str, str]]:
+    return [
+        (url_movil(url), "movil"),
+        (url, "pagina"),
+        (url_embed_pieza(url), "embed"),
+        (url_oembed(url), "oembed"),
+    ]
 
 
 def host_de_imagen_permitido(url: str) -> bool:
@@ -134,6 +149,44 @@ def miniatura_oembed(data) -> str:
     return ""
 
 
+def incorporar_html(lectura: LecturaFoto, html: str, origen: str) -> None:
+    for doc in documentos(html):
+        if not lectura.caption:
+            texto = caption_de_documento(doc)
+            if texto:
+                lectura.caption = texto
+        if not lectura.imagenes:
+            imagenes = [item for item in imagenes_de_documento(doc) if host_de_imagen_permitido(item)]
+            if imagenes:
+                lectura.imagenes = imagenes
+                lectura.origen = origen
+                continue
+            mini = miniatura_oembed(doc)
+            if mini and not lectura.imagenes:
+                lectura.imagenes = [mini]
+                lectura.origen = "miniatura"
+
+
+def html_con_navegador(url: str) -> str:
+    """Último intento: la página pública ya renderizada. Sin Playwright, vacío."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return ""
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+                page.wait_for_timeout(2_000)
+                return page.content() or ""
+            finally:
+                browser.close()
+    except Exception:
+        return ""
+
+
 def leer_slideshow(
     lector: Lector,
     url: str,
@@ -141,10 +194,11 @@ def leer_slideshow(
     pausa: tuple[float, float],
     dormir,
     rng,
+    navegador=None,
 ) -> LecturaFoto:
-    """Prueba la página, el embed y el oEmbed. Para en 403 o 429."""
+    """Prueba la ficha móvil, la página, el embed y el oEmbed. Para en 403 o 429."""
     lectura = LecturaFoto()
-    paginas = [(url, "pagina"), (url_embed_pieza(url), "embed"), (url_oembed(url), "oembed")]
+    paginas = fuentes_publicas(url)
     vistos: set[str] = set()
     for indice, (direccion, origen) in enumerate(paginas):
         if direccion in vistos:
@@ -159,28 +213,15 @@ def leer_slideshow(
         if respuesta.status >= 400:
             lectura.error = lectura.error or f"http {respuesta.status}"
             continue
-        docs = documentos(respuesta.text)
-        if not lectura.caption:
-            for doc in docs:
-                texto = caption_de_documento(doc)
-                if texto:
-                    lectura.caption = texto
-                    break
-        if not lectura.imagenes:
-            for doc in docs:
-                imagenes = [item for item in imagenes_de_documento(doc) if host_de_imagen_permitido(item)]
-                if imagenes:
-                    lectura.imagenes = imagenes
-                    lectura.origen = origen
-                    break
-                mini = miniatura_oembed(doc)
-                if mini:
-                    lectura.imagenes = [mini]
-                    lectura.origen = "miniatura"
+        incorporar_html(lectura, respuesta.text, origen)
         if lectura.imagenes and lectura.origen != "miniatura" and lectura.caption:
             break
-    if not lectura.imagenes and not lectura.caption and not lectura.error:
-        lectura.error = "sin imágenes públicas"
+    if not lectura.imagenes and navegador is not None:
+        html = navegador(url) or ""
+        if html:
+            incorporar_html(lectura, html, "navegador")
+    if not lectura.imagenes:
+        lectura.error = lectura.error or "sin imágenes públicas"
     return lectura
 
 

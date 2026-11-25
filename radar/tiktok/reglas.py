@@ -241,15 +241,49 @@ def _entero_vistas(valor) -> int | None:
     return int(text)
 
 
-def marcar_fijadas(piezas: list[Pieza]) -> int:
-    """El embed pone las fijadas delante y luego unas 10 recientes.
+def _tiempo_id(item_id: str) -> int | None:
+    if not item_id.isdigit():
+        return None
+    segundos = int(item_id) >> 32
+    if segundos < 1_000_000_000 or segundos > 4_000_000_000:
+        return None
+    return segundos
 
-    Si alguna pieza trae la marca explícita, manda esa marca. Si no, las que
-    sobran por encima de 10 se tratan como fijadas: es el convenio del embed,
-    no una suposición sobre el resto del perfil.
+
+def _prefijo_mas_viejo(piezas: list[Pieza]) -> int | None:
+    """Las fijadas van delante y son más viejas que el bloque reciente.
+
+    El bloque reciente sale de más nuevo a más viejo. Hace falta un tramo
+    de al menos 3 para no confundirlo con una lista desordenada.
+    """
+    tiempos = [_tiempo_id(pieza.item_id) for pieza in piezas]
+    if any(tiempo is None for tiempo in tiempos) or len(tiempos) < 4:
+        return None
+    inicio = len(tiempos) - 1
+    while inicio > 0 and tiempos[inicio - 1] >= tiempos[inicio]:
+        inicio -= 1
+    if inicio == 0 or (len(tiempos) - inicio) < 3:
+        return None
+    if any(tiempos[indice] >= tiempos[inicio] for indice in range(inicio)):
+        return None
+    return inicio
+
+
+def marcar_fijadas(piezas: list[Pieza]) -> int:
+    """El embed pone las fijadas delante y luego las recientes.
+
+    Si alguna pieza trae la marca explícita, manda esa marca. Si no, un
+    prefijo más viejo que el bloque reciente (de más nuevo a más viejo) se
+    trata como fijado. Sin fechas, las que sobran por encima de 10 se tratan
+    como fijadas: es el convenio del embed cuando no hay otra señal.
     """
     if any(pieza.fijada for pieza in piezas):
         return sum(1 for pieza in piezas if pieza.fijada)
+    prefijo = _prefijo_mas_viejo(piezas)
+    if prefijo is not None:
+        for indice, pieza in enumerate(piezas):
+            pieza.fijada = indice < prefijo
+        return prefijo
     extra = max(0, len(piezas) - RECIENTES)
     for indice, pieza in enumerate(piezas):
         pieza.fijada = indice < extra
