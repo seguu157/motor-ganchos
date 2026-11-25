@@ -433,6 +433,90 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Content-Disposition": f"attachment; filename=proyecto-{proyecto_id}.md"},
         )
 
+    @app.get("/tiktok", response_class=HTMLResponse)
+    def tiktok(request: Request) -> HTMLResponse:
+        from radar.tiktok.store import contar_por_estado, listar_cuentas, ultima_pasada, valores_distintos
+
+        estado = (request.query_params.get("estado") or "califica").strip() or "califica"
+        vistas = _vistas_param(request.query_params.get("vistas"))
+        filtros = {
+            "q": request.query_params.get("q") or "",
+            "nicho": request.query_params.get("nicho") or "",
+            "subnicho": request.query_params.get("subnicho") or "",
+            "vistas": request.query_params.get("vistas") or "",
+        }
+        return render(
+            "tiktok.html",
+            nav="tiktok",
+            title="Cuentas TikTok",
+            cuentas=listar_cuentas(
+                db,
+                nicho=filtros["nicho"] or None,
+                subnicho=filtros["subnicho"] or None,
+                estado=estado,
+                min_vistas=vistas,
+                q=filtros["q"] or None,
+            ),
+            nichos=valores_distintos(db, "nicho", estado=estado),
+            subnichos=valores_distintos(db, "subnicho", estado=estado),
+            conteos=contar_por_estado(db),
+            pasada=ultima_pasada(db),
+            filtros=filtros,
+            estado=estado,
+            aviso=request.query_params.get("aviso") or "",
+        )
+
+    @app.get("/tiktok/exportar.csv")
+    def tiktok_csv() -> PlainTextResponse:
+        from radar.tiktok.csvio import exportar_csv
+
+        return PlainTextResponse(
+            exportar_csv(db, estado="califica"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=cuentas-tiktok.csv"},
+        )
+
+    @app.get("/tiktok/{handle}", response_class=HTMLResponse)
+    def tiktok_detalle(handle: str) -> HTMLResponse:
+        from radar.tiktok.store import obtener_cuenta
+
+        cuenta = obtener_cuenta(db, handle)
+        if cuenta is None:
+            return render(
+                "vacio.html",
+                title="No está en el radar",
+                heading="Esa cuenta no está en el radar de TikTok",
+                text="Solo aparecen las que se han importado o leído.",
+                status_code=404,
+            )
+        return render(
+            "tiktok_detalle.html",
+            nav="tiktok",
+            title=f"@{cuenta['handle']}",
+            cuenta=cuenta,
+            piezas=_piezas_virales(cuenta.get("piezas_virales") or ""),
+        )
+
+    @app.post("/tiktok/semilla")
+    async def tiktok_semilla(request: Request) -> Response:
+        from radar.tiktok.store import anadir_semilla
+
+        form = await request.form()
+        valor = str(form.get("valor") or "").strip()
+        tipo = str(form.get("tipo") or "").strip() or None
+        try:
+            tipo_resuelto, limpio = _tipo_semilla_web(valor, tipo)
+            anadir_semilla(db, tipo_resuelto, limpio)
+        except ValueError as exc:
+            return render(
+                "vacio.html",
+                title="Semilla no válida",
+                heading="No se ha guardado la semilla",
+                text=str(exc),
+                status_code=400,
+            )
+        return RedirectResponse("/tiktok?aviso=Semilla+guardada.", status_code=303)
+
     @app.get("/ajustes", response_class=HTMLResponse)
     def ajustes() -> HTMLResponse:
         tube = TubeAlfredAdapter(settings.tubealfred_api_key)
@@ -527,6 +611,40 @@ def _radar_page(
         last_error=db.get_meta("last_error") or "",
         status_code=status_code,
     )
+
+
+def _vistas_param(value) -> int | None:
+    bruto = str(value or "").strip().replace(".", "").replace(",", "")
+    if not bruto:
+        return None
+    try:
+        numero = int(bruto)
+    except ValueError:
+        return None
+    return numero if numero >= 0 else None
+
+
+def _piezas_virales(texto: str) -> list[dict[str, str]]:
+    piezas = []
+    for trozo in (texto or "").split(" ; "):
+        limpio = trozo.strip()
+        if not limpio:
+            continue
+        url, _, resto = limpio.partition(" | ")
+        piezas.append({"url": url.strip(), "resto": resto.strip()})
+    return piezas
+
+
+def _tipo_semilla_web(valor: str, tipo: str | None) -> tuple[str, str]:
+    if tipo in {"keyword", "handle", "hashtag", "url"}:
+        return tipo, valor
+    if valor.lower().startswith(("http://", "https://")):
+        return "url", valor
+    if valor.startswith("#"):
+        return "hashtag", valor[1:]
+    if valor.startswith("@"):
+        return "handle", valor[1:]
+    return "keyword", valor
 
 
 def _reels_param(value, default: int) -> int:

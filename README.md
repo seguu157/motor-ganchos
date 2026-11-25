@@ -4,7 +4,9 @@ Motor para Antonio: mirar cuentas de Instagram, encontrar reels y carruseles que
 
 La interfaz está en español. La biblioteca filtra por categoría, formato y texto. Cada ficha tiene gancho, receta, prompts, ajustes, ideas, monetización y adaptación al perfil. El flujo guiado va de la oferta al Markdown. El tablero kanban y el teleprompter no están: quedan para más adelante.
 
-No inventa métricas. Si un dato no viene del navegador, de Apify, de Instaloader, de la transcripción, del OCR o de una fixture marcada como ejemplo, no aparece.
+No inventa métricas. Si un dato no viene del navegador, de Apify, de Instaloader, de la transcripción, del OCR, del embed público de TikTok o de una fixture marcada como ejemplo, no aparece.
+
+También vigila cuentas de TikTok que venden con slideshows. El uso está en [Radar de cuentas TikTok](#radar-de-cuentas-tiktok).
 
 ## Qué hace una tanda
 
@@ -104,6 +106,11 @@ No hace falta token. Los tests no llaman a Apify.
 | `RADAR_BROWSER_PAUSE_POST` | Pausa al azar entre páginas del mismo perfil. Por defecto `3-8`. |
 | `RADAR_COMMENT_WEIGHT` | Cuántos me gusta vale un comentario en un carrusel. Por defecto `4`. |
 | `RADAR_HOST` / `RADAR_PORT` | Por defecto `127.0.0.1:8000`. |
+| `RADAR_TT_PAUSE` | Pausa al azar entre lecturas de TikTok, `mínimo-máximo` en segundos. Por defecto `2-6`. |
+| `RADAR_TT_MAX` | Cuentas de TikTok por pasada. Por defecto `12`. |
+| `RADAR_TT_MAX_PAGINAS` | Páginas públicas (listas, hashtags) por pasada. Por defecto `3`. |
+| `RADAR_TT_VISTAS_MIN` | Vistas mínimas de una pieza viral, además del 2×. Por defecto `50000`. |
+| `RADAR_TT_APIFY_ACTOR` | Actor opcional. Sin esto, o sin `--apify`, no se llama a Apify. |
 
 Copia `.env.example`. Los secretos no se guardan en la base y la pantalla de Ajustes solo dice si están definidos.
 
@@ -312,9 +319,59 @@ radar run --source instaloader --yes
 radar run --source apify --yes
 radar run --conservar-imagenes --yes
 radar serve
+radar cuentas descubrir
+radar cuentas descubrir --yes
+radar cuentas actualizar --yes
+radar cuentas exportar --out cuentas-tiktok.csv
+radar cuentas programar
 ```
 
-`radar run --yes` es el comando del cron. Imprime la fuente y la estimación, y luego lanza. Con el navegador o con Instaloader el coste impreso es 0,00 USD. `--skip-transcribe` y `--skip-llm` saltan esos pasos. `--source` vale `playwright`, `apify`, `instaloader` o `auto`.
+`radar run --yes` es el comando del cron. El de TikTok, cada mañana en Windows, está en la sección siguiente.
+
+## Radar de cuentas TikTok
+
+Busca cuentas que venden algo (sobre todo apps, también tiendas y productos) con slideshows, se queda con las que tienen viralidad real y las acumula por handle. La pestaña está en `radar serve`, ruta `/tiktok`.
+
+Una pieza cuenta como viral si sus vistas son **al menos el doble de la mediana** y **al menos 50.000**. La mediana es la de las últimas publicaciones que devuelve `https://www.tiktok.com/embed/@usuario` (unas 10), sin las fijadas. Si el embed trae más de 10, las que van delante se tratan como fijadas y pueden ser la mejor pieza, pero se marcan. La cuenta pasa si además vende algo que se ve en la bio, el enlace o los pies, y al menos la mitad de la muestra es slideshow (portada `photomode`).
+
+Las cifras salen de esa lectura. Si TikTok no devuelve seguidores o vistas, el campo se queda vacío: no se pone un cero ni se redondea un «1,2M» a mano. La columna `fuente` dice de dónde salió y qué día se leyó.
+
+La primera vez, la base carga sola el corte de 129 cuentas (`radar/fixtures/cuentas-tiktok.csv`). También vale `radar cuentas importar ruta.csv`. Un handle repetido se actualiza y **conserva `fecha_detectada`**.
+
+```powershell
+radar cuentas descubrir
+radar cuentas descubrir --yes
+radar cuentas actualizar --yes
+radar cuentas ciclo --yes
+radar cuentas exportar --out cuentas-tiktok.csv
+radar cuentas listar --nicho "Belleza"
+radar cuentas semilla "#studyapp"
+radar cuentas programar
+```
+
+Sin `--yes` no hay ninguna petición: solo enseña el plan. `descubrir` encola handles nuevos. `actualizar` vuelve a leer las que ya califican, las más antiguas primero, y no borra las que no toca. `ciclo` hace las dos; si TikTok bloquea a mitad, para y no sigue con la actualización.
+
+De dónde salen las cuentas, sin login y sin API de pago:
+
+- Semillas que puedes cambiar: palabras, `#hashtags`, `@cuentas` y URLs de listas públicas (por defecto, bibliotecas de slideshows de apps).
+- Menciones `@cuenta` en bios y pies ya leídos.
+- El nombre del producto, si aparece como dominio o hashtag, se mira en la página pública del hashtag.
+- Apify solo si pasas `--apify` y hay `APIFY_TOKEN` y `RADAR_TT_APIFY_ACTOR`. Si falta cualquiera, no se llama. Del actor solo se guardan handles; las vistas se leen después en el embed.
+
+Entre lecturas hay una pausa al azar (`RADAR_TT_PAUSE`, 2–6 segundos). Cada pasada tiene un tope (`RADAR_TT_MAX`, 12 cuentas, y `RADAR_TT_MAX_PAGINAS`, 3 páginas). Un 403, un 429 o dos páginas vacías seguidas paran la pasada. Lo ya guardado se queda.
+
+El nicho, el subnicho y el «qué vende» los propone el mismo LLM que el resto de la app (`codex exec` por defecto). Si no responde, se usa una heurística y la ficha queda como «REVISAR». Una clasificación «revisada a mano» no se pisa al actualizar.
+
+En Windows, cada día a las 07:00:
+
+```powershell
+radar cuentas programar --hora 07:00
+radar cuentas programar --hora 07:00 --instalar
+```
+
+Eso escribe `data\radar-cuentas-tiktok.ps1` (entra en la carpeta del proyecto y lanza `radar cuentas ciclo --yes`) e imprime el `schtasks` correspondiente. `--instalar` registra la tarea solo en Windows.
+
+`radar run --yes` es el comando del cron de Instagram. Imprime la fuente y la estimación, y luego lanza. Con el navegador o con Instaloader el coste impreso es 0,00 USD. `--skip-transcribe` y `--skip-llm` saltan esos pasos. `--source` vale `playwright`, `apify`, `instaloader` o `auto`.
 
 ## Docker y cron
 

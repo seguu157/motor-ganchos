@@ -131,6 +131,48 @@ def main(argv: list[str] | None = None) -> int:
     banco.add_argument("--q", default=None)
     banco.add_argument("--ocultar-ejemplos", action="store_true")
 
+    cuentas = sub.add_parser("cuentas", help="Radar de cuentas TikTok que venden con slideshows")
+    cuentas_sub = cuentas.add_subparsers(dest="cuentas_command", required=True)
+    descubrir = cuentas_sub.add_parser("descubrir", help="Busca cuentas nuevas y las lee")
+    descubrir.add_argument("--yes", action="store_true", help="Lee TikTok. Sin esto solo enseña el plan")
+    descubrir.add_argument("--max", type=int, default=None, help="Cuentas a leer en esta pasada")
+    descubrir.add_argument("--paginas", type=int, default=None, help="Páginas públicas (listas, hashtags) a abrir")
+    descubrir.add_argument("--sin-llm", action="store_true", help="Clasifica solo con la heurística")
+    descubrir.add_argument("--semilla", action="append", default=[], help="keyword, @handle, #hashtag o https://...")
+    descubrir.add_argument("--pausa", default=None, help="Pausa al azar, mínimo-máximo en segundos")
+    descubrir.add_argument("--apify", action="store_true", help="Opcional. Sin token no llama a Apify")
+    actualizar = cuentas_sub.add_parser("actualizar", help="Vuelve a leer cuentas que ya califican")
+    actualizar.add_argument("--yes", action="store_true")
+    actualizar.add_argument("--max", type=int, default=None)
+    actualizar.add_argument("--handle", default=None)
+    actualizar.add_argument("--sin-llm", action="store_true")
+    actualizar.add_argument("--pausa", default=None)
+    ciclo = cuentas_sub.add_parser("ciclo", help="Descubre y, si TikTok no bloquea, actualiza")
+    ciclo.add_argument("--yes", action="store_true")
+    ciclo.add_argument("--max", type=int, default=None)
+    ciclo.add_argument("--sin-llm", action="store_true")
+    ciclo.add_argument("--pausa", default=None)
+    ciclo.add_argument("--apify", action="store_true")
+    exportar = cuentas_sub.add_parser("exportar", help="CSV con las columnas del corte")
+    exportar.add_argument("--out", default="-")
+    exportar.add_argument("--todas", action="store_true", help="Incluye candidatas y descartadas")
+    importar = cuentas_sub.add_parser("importar", help="Importa un CSV. Sin ruta, carga el corte incluido")
+    importar.add_argument("path", nargs="?", default=None)
+    listar = cuentas_sub.add_parser("listar", help="Lista las cuentas guardadas")
+    listar.add_argument("--nicho", default=None)
+    listar.add_argument("--subnicho", default=None)
+    listar.add_argument("--min-vistas", type=int, default=None)
+    listar.add_argument("--estado", default="califica")
+    listar.add_argument("--q", default=None)
+    programar = cuentas_sub.add_parser("programar", help="Comando del Programador de tareas de Windows")
+    programar.add_argument("--hora", default="07:00")
+    programar.add_argument("--tarea", default="RadarCuentasTikTok")
+    programar.add_argument("--instalar", action="store_true", help="En Windows, registra la tarea")
+    semilla = cuentas_sub.add_parser("semilla", help="Añade una semilla de descubrimiento")
+    semilla.add_argument("valor")
+    semilla.add_argument("--tipo", default=None, choices=("keyword", "handle", "hashtag", "url"))
+    cuentas_sub.add_parser("semillas", help="Lista las semillas activas")
+
     accounts = sub.add_parser("accounts", help="Watchlist de cuentas")
     account_sub = accounts.add_subparsers(dest="account_command", required=True)
     account_sub.add_parser("list")
@@ -176,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
             return _llm_check(settings)
         if args.command == "accounts":
             return _accounts(db, args)
+        if args.command == "cuentas":
+            return _cuentas(db, settings, args)
     except (
         MissingApifyToken,
         OverBudget,
@@ -429,6 +473,128 @@ def _accounts(db: Database, args) -> int:
     db.delete_account(username)
     print(f"Eliminada @{username}")
     return 0
+
+
+def _cuentas(db: Database, settings, args) -> int:
+    from radar.tiktok.csvio import SEMILLA_CSV, exportar_csv, importar_csv, importar_semilla_si_falta
+    from radar.tiktok.descubrir import ejecutar_actualizacion, ejecutar_ciclo, ejecutar_descubrimiento
+    from radar.tiktok.programar import instalar_tarea, preparar_tarea
+    from radar.tiktok.store import anadir_semilla, asegurar_semillas_defecto, listar_cuentas, listar_semillas
+
+    if args.cuentas_command == "importar":
+        ruta = args.path or SEMILLA_CSV
+        total = importar_csv(db, ruta)
+        print(f"Importadas {total} cuentas desde {ruta}.")
+        return 0
+    importar_semilla_si_falta(db)
+    if args.cuentas_command == "exportar":
+        estado = "todas" if args.todas else "califica"
+        texto = exportar_csv(db, None if args.out == "-" else args.out, estado=estado)
+        if args.out == "-":
+            sys.stdout.write(texto)
+        else:
+            print(f"Escrito {args.out}")
+        return 0
+    if args.cuentas_command == "listar":
+        cuentas = listar_cuentas(
+            db,
+            nicho=args.nicho,
+            subnicho=args.subnicho,
+            estado=args.estado,
+            min_vistas=args.min_vistas,
+            q=args.q,
+        )
+        if not cuentas:
+            print("Ninguna cuenta con esos filtros.")
+            return 0
+        for cuenta in cuentas:
+            vistas = cuenta.get("mejor_pieza_vistas")
+            vistas_txt = "—" if vistas is None else str(vistas)
+            print(
+                f"@{cuenta['handle']}  {cuenta.get('nicho') or '—'}  "
+                f"{cuenta.get('subnicho') or '—'}  {vistas_txt}  {cuenta.get('que_vende') or ''}"
+            )
+        return 0
+    if args.cuentas_command == "semillas":
+        asegurar_semillas_defecto(db)
+        for semilla in listar_semillas(db):
+            print(f"{semilla['tipo']}  {semilla['valor']}")
+        return 0
+    if args.cuentas_command == "semilla":
+        tipo, valor = _tipo_semilla(args.valor, args.tipo)
+        anadir_semilla(db, tipo, valor)
+        print(f"Semilla {tipo}: {valor}")
+        return 0
+    if args.cuentas_command == "programar":
+        programa = preparar_tarea(hora=args.hora, tarea=args.tarea)
+        print(programa.script)
+        print(programa.comando)
+        if args.instalar:
+            print(instalar_tarea(programa))
+        return 0
+    for texto in getattr(args, "semilla", []) or []:
+        tipo, valor = _tipo_semilla(texto, None)
+        anadir_semilla(db, tipo, valor)
+    pausa = _pausa(args.pausa) if getattr(args, "pausa", None) else None
+    if args.cuentas_command == "descubrir":
+        informe = ejecutar_descubrimiento(
+            db,
+            settings,
+            permitir_red=args.yes,
+            max_cuentas=args.max,
+            max_paginas=args.paginas,
+            sin_llm=args.sin_llm,
+            usar_apify=args.apify,
+            pausa=pausa,
+        )
+    elif args.cuentas_command == "actualizar":
+        informe = ejecutar_actualizacion(
+            db,
+            settings,
+            permitir_red=args.yes,
+            max_cuentas=args.max,
+            handle=args.handle,
+            sin_llm=args.sin_llm,
+            pausa=pausa,
+        )
+    else:
+        informe = ejecutar_ciclo(
+            db,
+            settings,
+            permitir_red=args.yes,
+            max_cuentas=args.max,
+            sin_llm=args.sin_llm,
+            usar_apify=args.apify,
+            pausa=pausa,
+        )
+    print(informe.mensaje)
+    if informe.status == "error":
+        return 2
+    return 0
+
+
+def _tipo_semilla(valor: str, tipo: str | None) -> tuple[str, str]:
+    if tipo:
+        return tipo, valor
+    bruto = (valor or "").strip()
+    if bruto.lower().startswith(("http://", "https://")):
+        return "url", bruto
+    if bruto.startswith("#"):
+        return "hashtag", bruto[1:]
+    if bruto.startswith("@"):
+        return "handle", bruto[1:]
+    return "keyword", bruto
+
+
+def _pausa(texto: str) -> tuple[float, float]:
+    partes = texto.split("-")
+    if len(partes) != 2:
+        raise ValueError("La pausa tiene que ser mínimo-máximo, por ejemplo 2-6.")
+    bajo = float(partes[0].strip().replace(",", "."))
+    alto = float(partes[1].strip().replace(",", "."))
+    if bajo < 0 or alto < bajo:
+        raise ValueError("La pausa tiene que ir de menor a mayor.")
+    return (bajo, alto)
 
 
 def _serve(settings, host: str | None, port: int | None) -> int:
