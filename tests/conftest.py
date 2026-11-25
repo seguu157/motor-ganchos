@@ -1,7 +1,34 @@
+import subprocess
+
 import pytest
 
 from radar.config import load_settings
 from radar.db import Database
+
+
+def _es_schtasks(comando) -> bool:
+    if isinstance(comando, str):
+        partes = comando.strip().split()
+        token = partes[0] if partes else ""
+    elif isinstance(comando, (list, tuple)) and comando:
+        token = str(comando[0])
+    else:
+        return False
+    nombre = token.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+    return nombre in {"schtasks", "schtasks.exe"}
+
+
+@pytest.fixture(autouse=True)
+def _sin_schtasks(monkeypatch):
+    """Ningún test puede registrar una tarea de Windows, esté o no en Windows."""
+    real = subprocess.run
+
+    def run(comando, *args, **kwargs):
+        if _es_schtasks(comando):
+            raise AssertionError(f"Un test ha intentado ejecutar schtasks: {comando}")
+        return real(comando, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
 
 
 @pytest.fixture(autouse=True)

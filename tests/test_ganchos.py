@@ -643,6 +643,17 @@ def test_cli_exporta_y_programa_sin_schtasks(settings, tmp_path, monkeypatch, ca
     script = tmp_path / "data" / "radar-ganchos.ps1"
     assert "ganchos ciclo --yes" in script.read_text(encoding="utf-8")
     programa = preparar_tarea(cwd=tmp_path, destino=tmp_path / "tarea.ps1", hora="09:15")
-    assert "Windows" in instalar_tarea(programa)
+    llamadas: list[list[str]] = []
+
+    def falso_run(comando, *_args, **_kwargs):
+        llamadas.append([str(parte) for parte in comando])
+        return type("Resultado", (), {"returncode": 0, "stdout": "Tarea registrada.", "stderr": ""})()
+
+    # El mismo doble en Linux y en Windows: la rama de schtasks corre, el binario no.
+    monkeypatch.setattr("radar.ganchos.programar._es_windows", lambda: True)
+    monkeypatch.setattr("subprocess.run", falso_run)
+    assert instalar_tarea(programa) == "Tarea registrada."
+    assert llamadas[0][:5] == ["schtasks", "/Create", "/F", "/TN", "RadarGanchos"]
+    assert "tarea.ps1" in llamadas[0][-1]
     md, _csv = exportar(db, str(tmp_path / "uno.md"))
     assert md is not None and md.suffix == ".md"
