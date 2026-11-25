@@ -7,7 +7,7 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from radar.tiktok.reglas import Pieza, entero_vistas, normalizar_handle
+from radar.tiktok.reglas import Pieza, entero_vistas, handles_en_html, normalizar_handle
 
 _SCRIPT_REHIDRATACION = re.compile(
     r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
@@ -164,6 +164,43 @@ def parsear_embed(html: str, handle: str) -> EmbedParseado:
             )
         )
     return EmbedParseado(piezas, crudo={"n": len(piezas)})
+
+
+_AUTHOR_UNIQUE = re.compile(r'"authorUniqueId"\s*:\s*"([^"]+)"')
+
+# El embed del tag responde así cuando la cuenta no se puede abrir.
+MOTIVOS_ESTADO = {
+    "10221": "cuenta privada o embed no disponible (status 10221)",
+    "10202": "usuario no encontrado (status 10202)",
+    "10222": "cuenta privada (status 10222)",
+}
+
+
+def motivo_sin_perfil(error: str) -> str:
+    coincidencia = re.search(r"status\s+(\d+)", error or "")
+    if coincidencia and coincidencia.group(1) in MOTIVOS_ESTADO:
+        return MOTIVOS_ESTADO[coincidencia.group(1)]
+    if error:
+        return f"sin datos accesibles ({error})"
+    return "sin datos accesibles"
+
+
+def handles_publicos(html: str) -> list[str]:
+    """Handles escritos en la página: JSON del embed, autores y URLs."""
+    vistos: list[str] = []
+
+    def sumar(crudo: str) -> None:
+        handle = normalizar_handle(crudo)
+        if handle and handle not in vistos:
+            vistos.append(handle)
+
+    for handle in handles_en_rehidratacion(html):
+        sumar(handle)
+    for handle in handles_en_html(html):
+        sumar(handle)
+    for crudo in _AUTHOR_UNIQUE.findall(html or ""):
+        sumar(crudo)
+    return vistos
 
 
 def handles_en_rehidratacion(html: str) -> list[str]:

@@ -107,8 +107,8 @@ No hace falta token. Los tests no llaman a Apify.
 | `RADAR_COMMENT_WEIGHT` | Cuántos me gusta vale un comentario en un carrusel. Por defecto `4`. |
 | `RADAR_HOST` / `RADAR_PORT` | Por defecto `127.0.0.1:8000`. |
 | `RADAR_TT_PAUSE` | Pausa al azar entre lecturas de TikTok, `mínimo-máximo` en segundos. Por defecto `2-6`. |
-| `RADAR_TT_MAX` | Cuentas de TikTok por pasada. Por defecto `12`. |
-| `RADAR_TT_MAX_PAGINAS` | Páginas públicas (listas, hashtags) por pasada. Por defecto `3`. |
+| `RADAR_TT_MAX` | Cuentas de TikTok que se leen enteras en una pasada. Por defecto `12`. El resto se queda en cola. |
+| `RADAR_TT_MAX_PAGINAS` | Páginas de descubrimiento por pasada (embed de tag, búsquedas y listas). Por defecto `12`. |
 | `RADAR_TT_VISTAS_MIN` | Vistas mínimas de una pieza viral, además del 2×. Por defecto `50000`. |
 | `RADAR_TT_APIFY_ACTOR` | Actor opcional. Sin esto, o sin `--apify`, no se llama a Apify. |
 
@@ -353,12 +353,13 @@ Sin `--yes` no hay ninguna petición: solo enseña el plan. `descubrir` encola h
 
 De dónde salen las cuentas, sin login y sin API de pago:
 
-- Semillas que puedes cambiar: palabras, `#hashtags`, `@cuentas` y URLs de listas públicas (por defecto, bibliotecas de slideshows de apps).
+- El embed público del tag, `tiktok.com/embed/tag/nombre`. La página `/tag/` a secas no trae autores. El embed sí: el campo `authorUniqueId`. Los nombres salen de lo que ya venden las cuentas guardadas (EasyStars, Vent Now, …) y de las semillas.
+- Búsquedas `site:tiktok.com/photo "nombre de la app"` en Bing (RSS) y en el HTML de DuckDuckGo. Si el buscador no devuelve enlaces, no se inventa ninguno.
+- Listas públicas (por defecto gr0w, Reelsfarm y similares) y los enlaces de categorías de esa misma web.
 - Menciones `@cuenta` en bios y pies ya leídos.
-- El nombre del producto, si aparece como dominio o hashtag, se mira en la página pública del hashtag.
 - Apify solo si pasas `--apify` y hay `APIFY_TOKEN` y `RADAR_TT_APIFY_ACTOR`. Si falta cualquiera, no se llama. Del actor solo se guardan handles; las vistas se leen después en el embed.
 
-Entre lecturas hay una pausa al azar (`RADAR_TT_PAUSE`, 2–6 segundos). Cada pasada tiene un tope (`RADAR_TT_MAX`, 12 cuentas, y `RADAR_TT_MAX_PAGINAS`, 3 páginas). Un 403, un 429 o dos páginas vacías seguidas paran la pasada. Lo ya guardado se queda.
+Entre lecturas hay una pausa al azar (`RADAR_TT_PAUSE`, por defecto 2–6 segundos). `RADAR_TT_MAX` (12) es cuántas cuentas se leen enteras; las demás se quedan en cola para la siguiente pasada. `RADAR_TT_MAX_PAGINAS` (12) es cuántas páginas de descubrimiento se abren. `RADAR_TT_VISTAS_MIN` (50000) es el suelo de vistas, además del doble de la mediana. Un 403 o un 429 paran la pasada. El status 10221 de una cuenta (privada o embed no disponible) se anota en esa cuenta y no para el resto. Lo ya guardado se queda.
 
 El nicho, el subnicho y el «qué vende» los propone el mismo LLM que el resto de la app (`codex exec` por defecto). Si no responde, se usa una heurística y la ficha queda como «REVISAR». Una clasificación «revisada a mano» no se pisa al actualizar.
 

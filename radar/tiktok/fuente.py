@@ -5,15 +5,15 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
+from radar.tiktok.consultas import enlaces_de_listado
 from radar.tiktok.parse import (
     EmbedParseado,
     PerfilParseado,
-    handles_en_rehidratacion,
+    handles_publicos,
     parece_bloqueo,
     parsear_embed,
     parsear_perfil,
 )
-from radar.tiktok.reglas import handles_en_html
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -75,8 +75,9 @@ def url_embed(handle: str) -> str:
 
 
 def url_hashtag(tag: str) -> str:
+    """Embed del tag: el `/tag/` a secas no trae autores sin JavaScript."""
     limpio = "".join(caracter for caracter in tag.casefold() if caracter.isalnum() or caracter == "_")
-    return f"https://www.tiktok.com/tag/{limpio}"
+    return f"https://www.tiktok.com/embed/tag/{limpio}"
 
 
 class Lector:
@@ -119,14 +120,13 @@ class Lector:
         return parsear_embed(respuesta.text, handle)
 
     def handles_de_pagina(self, url: str) -> list[str]:
+        return self.leer_pagina(url)[0]
+
+    def leer_pagina(self, url: str) -> tuple[list[str], list[str]]:
         respuesta = self._leer(url)
         if respuesta.status >= 400 or parece_bloqueo(respuesta.text):
-            return []
-        vistos: list[str] = []
-        for handle in [*handles_en_rehidratacion(respuesta.text), *handles_en_html(respuesta.text)]:
-            if handle not in vistos:
-                vistos.append(handle)
-        return vistos
+            return [], []
+        return handles_publicos(respuesta.text), enlaces_de_listado(respuesta.text, url)
 
 
 def pausar(rng: random.Random, dormir, tramo: tuple[float, float]) -> None:

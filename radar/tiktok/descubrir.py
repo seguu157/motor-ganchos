@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 from radar.db import Database, utc_now
 from radar.tiktok.apify_opcional import buscar_handles
 from radar.tiktok.clasificar import Clasificador
+from radar.tiktok.consultas import ordenar_paginas, preparar_consultas
 from radar.tiktok.fuente import Lector, TikTokBloqueado, Transporte, pausar, url_hashtag
-from radar.tiktok.reglas import evaluar, hashtags, menciones, normalizar_handle, slugs_de_keyword, slugs_de_texto
+from radar.tiktok.parse import motivo_sin_perfil
+from radar.tiktok.reglas import evaluar, hashtags, menciones, normalizar_handle, slugs_de_keyword
 from radar.tiktok.store import (
     anadir_semilla,
     asegurar_semillas_defecto,
@@ -115,7 +117,9 @@ def _leer_y_guardar(
             for pieza in embed.piezas
         ],
     }
-    if perfil.error.startswith("status "):
+    if perfil.error.startswith("status ") and not embed.piezas:
+        # 10221 y similares son una respuesta, no un bloqueo de toda la pasada.
+        # Si el embed sí trae piezas, se evalúan más abajo: no se tiran.
         lector.anotar(vacio=False)
         guardar_cuenta(
             db,
@@ -126,7 +130,7 @@ def _leer_y_guardar(
                 semilla,
                 crudo,
                 estado="descartada",
-                motivo=f"sin datos accesibles ({perfil.error})",
+                motivo=motivo_sin_perfil(perfil.error),
             ),
             conservar_manual=conservar_manual,
         )
@@ -240,6 +244,21 @@ def _base(handle, perfil, fuente, semilla, crudo, *, estado: str, motivo: str) -
     }
 
 
+def _url_de_semilla(semilla: dict) -> tuple[str, str]:
+    tipo = semilla["tipo"]
+    valor = semilla["valor"]
+    if tipo == "url" or tipo == "busqueda":
+        return valor, f"{tipo}:{valor}"
+    if tipo == "hashtag":
+        return url_hashtag(valor), f"hashtag:{valor}"
+    if tipo == "keyword":
+        slugs = slugs_de_keyword(valor)
+        if not slugs:
+            return "", ""
+        return url_hashtag(slugs[0]), f"keyword:{valor}"
+    return "", ""
+
+
 def _paginas(
     db: Database,
     lector: Lector,
@@ -252,50 +271,39 @@ def _paginas(
 ) -> None:
     if max_paginas <= 0:
         return
+    preparar_consultas(db)
+    plan = ordenar_paginas(listar_semillas(db), max_paginas)
     hechas = 0
-    # Las listas públicas van antes que un hashtag genérico, y lo ya leído
-    # hoy cede el turno: así una pasada corta no se queda siempre en lo mismo.
-    prioridad = {"url": 0, "keyword": 1, "hashtag": 2}
-    semillas = sorted(
-        listar_semillas(db),
-        key=lambda semilla: (semilla.get("leida_en") or "", prioridad.get(semilla["tipo"], 9), semilla["valor"]),
-    )
-    for semilla in semillas:
-        if hechas >= max_paginas:
-            return
-        tipo = semilla["tipo"]
-        valor = semilla["valor"]
-        if tipo == "url":
-            url, origen = valor, f"url:{valor}"
-        elif tipo == "hashtag":
-            url, origen = url_hashtag(valor), f"hashtag:{valor}"
-        elif tipo == "keyword":
-            slugs = slugs_de_keyword(valor)
-            if not slugs:
+    vistas: set[str] = set()
+    extra: list[str] = []
+    indice = 0
+    while hechas < max_paginas and (indice < len(plan) or extra):
+        if indice < len(plan):
+            semilla = plan[indice]
+            indice += 1
+            url, origen = _url_de_semilla(semilla)
+            if not url:
+                marcar_semilla_leida(db, semilla["tipo"], semilla["valor"], hoy())
                 continue
-            url, origen = url_hashtag(slugs[0]), f"keyword:{valor}"
+            tipo_leido = (semilla["tipo"], semilla["valor"])
         else:
+            url = extra.pop(0)
+            origen = f"enlace:{url}"
+            tipo_leido = ("url", url)
+        if url in vistas:
             continue
-        encontrados = lector.handles_de_pagina(url)
-        marcar_semilla_leida(db, tipo, valor, hoy())
+        vistas.add(url)
+        encontrados, enlaces = lector.leer_pagina(url)
+        marcar_semilla_leida(db, tipo_leido[0], tipo_leido[1], hoy())
         for handle in encontrados:
             encolar_handle(db, handle, origen, conocidas)
+        for enlace in enlaces:
+            if enlace in vistas or enlace in extra:
+                continue
+            anadir_semilla(db, "url", enlace, notas="lista enlazada")
+            extra.append(enlace)
         hechas += 1
         pausar(rng, dormir, pausa)
-    if hechas >= max_paginas:
-        return
-    for cuenta in listar_cuentas(db, estado="califica"):
-        texto = " ".join(
-            [cuenta.get("bio") or "", cuenta.get("enlace_bio") or "", cuenta.get("que_vende") or ""]
-        )
-        slugs = slugs_de_texto(texto)
-        if not slugs:
-            continue
-        encontrados = lector.handles_de_pagina(url_hashtag(slugs[0]))
-        for handle in encontrados:
-            encolar_handle(db, handle, f"hashtag:{slugs[0]}", conocidas)
-        pausar(rng, dormir, pausa)
-        return
 
 
 class _Corte(TikTokBloqueado):
