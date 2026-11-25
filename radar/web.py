@@ -517,6 +517,99 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return RedirectResponse("/tiktok?aviso=Semilla+guardada.", status_code=303)
 
+    @app.get("/instagram", response_class=HTMLResponse)
+    def instagram(request: Request) -> HTMLResponse:
+        from radar.instagram.store import contar_por_estado, listar_cuentas, ultima_pasada, valores_distintos
+
+        estado = (request.query_params.get("estado") or "califica").strip() or "califica"
+        vistas = _vistas_param(request.query_params.get("vistas"))
+        seguidores = _vistas_param(request.query_params.get("seguidores"))
+        multiplo = _decimal_param(request.query_params.get("multiplo"))
+        filtros = {
+            "q": request.query_params.get("q") or "",
+            "nicho": request.query_params.get("nicho") or "",
+            "subnicho": request.query_params.get("subnicho") or "",
+            "idioma": request.query_params.get("idioma") or "",
+            "seguidores": request.query_params.get("seguidores") or "",
+            "vistas": request.query_params.get("vistas") or "",
+            "multiplo": request.query_params.get("multiplo") or "",
+        }
+        return render(
+            "instagram.html",
+            nav="instagram",
+            title="Creadores de Instagram",
+            cuentas=listar_cuentas(
+                db,
+                nicho=filtros["nicho"] or None,
+                subnicho=filtros["subnicho"] or None,
+                idioma=filtros["idioma"] or None,
+                estado=estado,
+                min_vistas=vistas,
+                min_seguidores=seguidores,
+                min_multiplo=multiplo,
+                q=filtros["q"] or None,
+            ),
+            nichos=valores_distintos(db, "nicho", estado=estado),
+            subnichos=valores_distintos(db, "subnicho", estado=estado),
+            idiomas=valores_distintos(db, "idioma", estado=estado),
+            conteos=contar_por_estado(db),
+            pasada=ultima_pasada(db),
+            filtros=filtros,
+            estado=estado,
+            aviso=request.query_params.get("aviso") or "",
+        )
+
+    @app.get("/instagram/exportar.csv")
+    def instagram_csv() -> PlainTextResponse:
+        from radar.instagram.csvio import exportar_csv
+
+        return PlainTextResponse(
+            exportar_csv(db, estado="califica"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=cuentas-instagram.csv"},
+        )
+
+    @app.get("/instagram/{handle}", response_class=HTMLResponse)
+    def instagram_detalle(handle: str) -> HTMLResponse:
+        from radar.instagram.store import obtener_cuenta
+
+        cuenta = obtener_cuenta(db, handle)
+        if cuenta is None:
+            return render(
+                "vacio.html",
+                title="No está en el radar",
+                heading="Ese creador no está en el radar de Instagram",
+                text="Solo aparecen los que se han importado o leído.",
+                status_code=404,
+            )
+        return render(
+            "instagram_detalle.html",
+            nav="instagram",
+            title=f"@{cuenta['handle']}",
+            cuenta=cuenta,
+            piezas=_piezas_virales(cuenta.get("piezas_virales") or ""),
+        )
+
+    @app.post("/instagram/semilla")
+    async def instagram_semilla(request: Request) -> Response:
+        from radar.instagram.store import anadir_semilla
+
+        form = await request.form()
+        valor = str(form.get("valor") or "").strip()
+        tipo = str(form.get("tipo") or "").strip() or None
+        try:
+            tipo_resuelto, limpio = _tipo_semilla_web(valor, tipo)
+            anadir_semilla(db, tipo_resuelto, limpio)
+        except ValueError as exc:
+            return render(
+                "vacio.html",
+                title="Semilla no válida",
+                heading="No se ha guardado la semilla",
+                text=str(exc),
+                status_code=400,
+            )
+        return RedirectResponse("/instagram?aviso=Semilla+guardada.", status_code=303)
+
     @app.get("/ajustes", response_class=HTMLResponse)
     def ajustes() -> HTMLResponse:
         tube = TubeAlfredAdapter(settings.tubealfred_api_key)
@@ -611,6 +704,17 @@ def _radar_page(
         last_error=db.get_meta("last_error") or "",
         status_code=status_code,
     )
+
+
+def _decimal_param(value) -> float | None:
+    bruto = str(value or "").strip().replace(",", ".")
+    if not bruto:
+        return None
+    try:
+        numero = float(bruto)
+    except ValueError:
+        return None
+    return numero if numero >= 0 else None
 
 
 def _vistas_param(value) -> int | None:

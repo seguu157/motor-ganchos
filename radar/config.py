@@ -59,6 +59,12 @@ class Settings:
     tt_max_paginas: int
     tt_vistas_min: int
     tt_apify_actor: str | None
+    ig_creadores_pause: tuple[float, float]
+    ig_creadores_max: int
+    ig_creadores_max_paginas: int
+    ig_creadores_vistas_min: int
+    ig_creadores_reels: int
+    ig_creadores_apify_actor: str | None
 
     @property
     def llm_api_key(self) -> str | None:
@@ -128,6 +134,12 @@ def load_settings() -> Settings:
         tt_max_paginas=_int("RADAR_TT_MAX_PAGINAS", 3, minimum=0),
         tt_vistas_min=_int("RADAR_TT_VISTAS_MIN", 50_000, minimum=1),
         tt_apify_actor=_blank(os.environ.get("RADAR_TT_APIFY_ACTOR")),
+        ig_creadores_pause=_span("RADAR_IG_CREADORES_PAUSE", (25.0, 50.0)),
+        ig_creadores_max=_int("RADAR_IG_CREADORES_MAX", 30, minimum=1),
+        ig_creadores_max_paginas=_int("RADAR_IG_CREADORES_MAX_PAGINAS", 2, minimum=0),
+        ig_creadores_vistas_min=_int("RADAR_IG_CREADORES_VISTAS_MIN", 50_000, minimum=1),
+        ig_creadores_reels=_int("RADAR_IG_CREADORES_REELS", 20, minimum=1),
+        ig_creadores_apify_actor=_blank(os.environ.get("RADAR_IG_CREADORES_APIFY_ACTOR")),
     )
 
 

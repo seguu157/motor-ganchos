@@ -33,6 +33,12 @@ def _entorno_limpio(monkeypatch):
         "RADAR_TT_MAX_PAGINAS",
         "RADAR_TT_VISTAS_MIN",
         "RADAR_TT_APIFY_ACTOR",
+        "RADAR_IG_CREADORES_PAUSE",
+        "RADAR_IG_CREADORES_MAX",
+        "RADAR_IG_CREADORES_MAX_PAGINAS",
+        "RADAR_IG_CREADORES_VISTAS_MIN",
+        "RADAR_IG_CREADORES_REELS",
+        "RADAR_IG_CREADORES_APIFY_ACTOR",
     ):
         monkeypatch.delenv(key, raising=False)
 

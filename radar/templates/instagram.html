@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <p class="eyebrow">Instagram</p>
+  <h1>Creadores de IA con reels virales</h1>
+  <p class="lede">Entran quienes hablan de herramientas, automatización, negocio o solopreneur con IA y tienen al menos un reel con el doble de su mediana y 50.000 reproducciones o más. La mediana sale de hasta 20 reels recientes no fijados. No hay cifras estimadas: si no se ha leído, no está.</p>
+</section>
+
+<p class="fine">Califican {{ conteos.get("califica", 0) }} · candidatas {{ conteos.get("candidata", 0) }} · descartadas {{ conteos.get("descartada", 0) }} · errores {{ conteos.get("error", 0) }}. La lectura usa la sesión de <code>radar login</code> y se lanza en la terminal: <code>radar creadores descubrir --yes</code>. Español e inglés van primero.</p>
+{% if pasada %}
+<p class="fine">Última pasada ({{ pasada.tipo }}): {{ pasada.message }}</p>
+{% endif %}
+
+<form class="filters" method="get" action="/instagram">
+  <label>Buscar
+    <input type="search" name="q" value="{{ filtros.get('q', '') }}" placeholder="Cuenta, bio o subnicho">
+  </label>
+  <label>Nicho
+    <select name="nicho">
+      <option value="">Todos</option>
+      {% for nombre in nichos %}
+      <option value="{{ nombre }}" {% if filtros.get('nicho') == nombre %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Subnicho
+    <select name="subnicho">
+      <option value="">Todos</option>
+      {% for nombre in subnichos %}
+      <option value="{{ nombre }}" {% if filtros.get('subnicho') == nombre %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Idioma
+    <select name="idioma">
+      <option value="">Todos</option>
+      {% for nombre in idiomas %}
+      <option value="{{ nombre }}" {% if filtros.get('idioma') == nombre %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Seguidores mínimos
+    <input name="seguidores" inputmode="numeric" value="{{ filtros.get('seguidores', '') }}" placeholder="100000">
+  </label>
+  <label>Reproducciones mínimas del mejor reel
+    <input name="vistas" inputmode="numeric" value="{{ filtros.get('vistas', '') }}" placeholder="50000">
+  </label>
+  <label>Múltiplo mínimo
+    <input name="multiplo" inputmode="decimal" value="{{ filtros.get('multiplo', '') }}" placeholder="2">
+  </label>
+  <label>Estado
+    <select name="estado">
+      {% for opcion in ("califica", "candidata", "descartada", "error", "todas") %}
+      <option value="{{ opcion }}" {% if estado == opcion %}selected{% endif %}>{{ opcion }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Filtrar</button>
+</form>
+
+<p class="export-row"><span>{{ cuentas|length }} en este filtro</span> <a href="/instagram/exportar.csv">Exportar CSV</a></p>
+
+<ul class="account-list">
+  {% for cuenta in cuentas %}
+  <li>
+    <div>
+      <a class="account" href="/instagram/{{ cuenta.handle }}">@{{ cuenta.handle }}</a>
+      {% if cuenta.nicho %}<span class="chip">{{ cuenta.nicho }}</span>{% endif %}
+      {% if cuenta.subnicho %}<span class="chip quiet">{{ cuenta.subnicho }}</span>{% endif %}
+      {% if cuenta.idioma %}<span class="chip quiet">{{ cuenta.idioma }}</span>{% endif %}
+      <p>{{ cuenta.bio or cuenta.motivo or "Sin bio leída" }}</p>
+      <p class="fine">{{ cuenta.seguidores|es_int }} seguidores · mediana {{ cuenta.mediana_vistas|es_int }} · mejor reel {{ cuenta.mejor_pieza_vistas|es_int }} ({{ cuenta.mejor_pieza_multiplo|multiple }}){% if cuenta.mejor_pieza_fijada == "sí" %} · fijado{% endif %} · no fijados {{ cuenta.num_virales_no_fijadas if cuenta.num_virales_no_fijadas is not none else "—" }}</p>
+    </div>
+  </li>
+  {% else %}
+  <li class="empty">No hay creadores con esos filtros. <code>radar creadores descubrir --yes</code> lee candidatas nuevas.</li>
+  {% endfor %}
+</ul>
+
+<form class="add-account" method="post" action="/instagram/semilla">
+  <label>Semilla para la próxima pasada
+    <input name="valor" required placeholder="@cuenta, #hashtag, keyword o https://...">
+  </label>
+  <label>Tipo
+    <select name="tipo">
+      <option value="">Detectar</option>
+      <option value="keyword">Palabra</option>
+      <option value="handle">Cuenta</option>
+      <option value="hashtag">Hashtag</option>
+      <option value="url">URL</option>
+    </select>
+  </label>
+  <button type="submit">Guardar semilla</button>
+</form>
+{% endblock %}

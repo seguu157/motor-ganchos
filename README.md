@@ -4,9 +4,9 @@ Motor para Antonio: mirar cuentas de Instagram, encontrar reels y carruseles que
 
 La interfaz está en español. La biblioteca filtra por categoría, formato y texto. Cada ficha tiene gancho, receta, prompts, ajustes, ideas, monetización y adaptación al perfil. El flujo guiado va de la oferta al Markdown. El tablero kanban y el teleprompter no están: quedan para más adelante.
 
-No inventa métricas. Si un dato no viene del navegador, de Apify, de Instaloader, de la transcripción, del OCR, del embed público de TikTok o de una fixture marcada como ejemplo, no aparece.
+No inventa métricas. Si un dato no viene del navegador, de Apify, de Instaloader, de la transcripción, del OCR, del embed público de TikTok, de la pestaña Reels o de una fixture marcada como ejemplo, no aparece.
 
-También vigila cuentas de TikTok que venden con slideshows. El uso está en [Radar de cuentas TikTok](#radar-de-cuentas-tiktok).
+También vigila cuentas de TikTok que venden con slideshows ([Radar de cuentas TikTok](#radar-de-cuentas-tiktok)) y creadores de Instagram del nicho de IA ([Radar de creadores de Instagram](#radar-de-creadores-de-instagram)).
 
 ## Qué hace una tanda
 
@@ -111,6 +111,12 @@ No hace falta token. Los tests no llaman a Apify.
 | `RADAR_TT_MAX_PAGINAS` | Páginas públicas (listas, hashtags) por pasada. Por defecto `3`. |
 | `RADAR_TT_VISTAS_MIN` | Vistas mínimas de una pieza viral, además del 2×. Por defecto `50000`. |
 | `RADAR_TT_APIFY_ACTOR` | Actor opcional. Sin esto, o sin `--apify`, no se llama a Apify. |
+| `RADAR_IG_CREADORES_PAUSE` | Pausa al azar entre perfiles de Instagram, `mínimo-máximo` en segundos. Por defecto `25-50`. |
+| `RADAR_IG_CREADORES_MAX` | Perfiles de Instagram por pasada. Por defecto `30`. |
+| `RADAR_IG_CREADORES_MAX_PAGINAS` | Páginas de hashtag o listas por pasada. Por defecto `2`. |
+| `RADAR_IG_CREADORES_VISTAS_MIN` | Reproducciones mínimas de un reel viral, además del 2×. Por defecto `50000`. |
+| `RADAR_IG_CREADORES_REELS` | Reels recientes no fijados que entran en la mediana. Por defecto `20`. |
+| `RADAR_IG_CREADORES_APIFY_ACTOR` | Actor opcional. Sin esto, o sin `--apify`, no se llama a Apify. |
 
 Copia `.env.example`. Los secretos no se guardan en la base y la pantalla de Ajustes solo dice si están definidos.
 
@@ -324,9 +330,14 @@ radar cuentas descubrir --yes
 radar cuentas actualizar --yes
 radar cuentas exportar --out cuentas-tiktok.csv
 radar cuentas programar
+radar creadores descubrir
+radar creadores descubrir --yes
+radar creadores ciclo --yes
+radar creadores exportar --out cuentas-instagram.csv
+radar creadores programar
 ```
 
-`radar run --yes` es el comando del cron. El de TikTok, cada mañana en Windows, está en la sección siguiente.
+`radar run --yes` es el comando del cron de la watchlist. El de TikTok y el de creadores de Instagram, cada mañana en Windows, están en las secciones siguientes.
 
 ## Radar de cuentas TikTok
 
@@ -371,7 +382,50 @@ radar cuentas programar --hora 07:00 --instalar
 
 Eso escribe `data\radar-cuentas-tiktok.ps1` (entra en la carpeta del proyecto y lanza `radar cuentas ciclo --yes`) e imprime el `schtasks` correspondiente. `--instalar` registra la tarea solo en Windows.
 
-`radar run --yes` es el comando del cron de Instagram. Imprime la fuente y la estimación, y luego lanza. Con el navegador o con Instaloader el coste impreso es 0,00 USD. `--skip-transcribe` y `--skip-llm` saltan esos pasos. `--source` vale `playwright`, `apify`, `instaloader` o `auto`.
+## Radar de creadores de Instagram
+
+Busca creadores del nicho de inteligencia artificial y de negocios montados con IA (herramientas, automatización, agencia, productividad, programación o vibe coding, noticias, solopreneurs) que tengan al menos un reel viral, y los acumula por usuario. La pestaña está en `radar serve`, ruta `/instagram`. Español e inglés salen primero.
+
+Un reel cuenta como viral si sus reproducciones son **al menos el doble de la mediana** y **al menos 50.000**. La mediana es la de hasta 20 reels recientes **no fijados** que traen cifra. Los fijados pueden ser la mejor pieza, y se marcan, pero no entran en la mediana. Los carruseles no entran. La cuenta pasa si, además, la bio y los pies son de ese nicho.
+
+Las cifras salen de la pestaña Reels, leída con la misma sesión de Chromium que el motor (`radar login`, carpeta `IG_BROWSER_PROFILE`). Si Instagram no devuelve seguidores o reproducciones, el campo se queda vacío: no se pone un cero ni se interpreta un «1,2M». La columna `fuente` dice de dónde salió y qué día se leyó.
+
+La primera vez, la base carga sola el corte de 34 creadores (`radar/fixtures/cuentas-instagram.csv`). También vale `radar creadores importar ruta.csv`. Un usuario repetido se actualiza y **conserva `fecha_detectada`**. Una clasificación «revisada a mano» no se pisa al actualizar.
+
+```powershell
+radar creadores descubrir
+radar creadores descubrir --yes
+radar creadores actualizar --yes
+radar creadores ciclo --yes
+radar creadores exportar --out cuentas-instagram.csv
+radar creadores listar --subnicho "Herramientas IA" --idioma es
+radar creadores semilla "#herramientasia"
+radar creadores programar
+```
+
+Sin `--yes` no se abre Instagram: solo enseña el plan. `descubrir` encola usuarios nuevos. `actualizar` vuelve a leer los que ya califican, los de lectura más antigua primero, y no borra las métricas si esa ficha no responde. `ciclo` hace las dos; si Instagram bloquea a mitad, para y no sigue con la actualización.
+
+De dónde salen los usuarios, sin API de pago:
+
+- Semillas que puedes cambiar: palabras, `#hashtags`, `@cuentas` y URLs de listas públicas.
+- Menciones `@cuenta` en bios y pies ya leídos, más colaboradores y cuentas etiquetadas en los reels.
+- Cuentas sugeridas, solo si vienen en la misma ficha. No se abre una página extra para buscarlas.
+- Apify solo si pasas `--apify` y hay `APIFY_TOKEN` y `RADAR_IG_CREADORES_APIFY_ACTOR`. Si falta cualquiera, no se llama. Del actor solo se guardan usuarios; las reproducciones se leen después en Reels.
+
+Entre perfiles hay una pausa al azar (`RADAR_IG_CREADORES_PAUSE`, 25–50 segundos). Cada pasada tiene un tope (`RADAR_IG_CREADORES_MAX`, 30 perfiles, y `RADAR_IG_CREADORES_MAX_PAGINAS`, 2 páginas). Un 401, un 403 de la página, un 429, un checkpoint, un challenge o un muro de login paran toda la pasada. Lo ya guardado se queda. La cuenta es la tuya: no subas el tope ni bajes la pausa si no hace falta.
+
+El subnicho y el idioma los propone el mismo LLM que el resto de la app (`codex exec` por defecto). Si no responde, se usa una heurística y la ficha queda como «REVISAR». Si el texto no es de IA, la cuenta se descarta aunque el reel sea viral.
+
+En Windows, cada día a las 07:30, un rato después de la tarea de TikTok:
+
+```powershell
+radar creadores programar --hora 07:30
+radar creadores programar --hora 07:30 --instalar
+```
+
+Eso escribe `data\radar-creadores-instagram.ps1` (entra en la carpeta del proyecto y lanza `radar creadores ciclo --yes`) e imprime el `schtasks` correspondiente. `--instalar` registra la tarea solo en Windows. Hace falta haber hecho `radar login` en esa misma máquina: la tarea reutiliza el perfil del navegador.
+
+`radar run --yes` es el comando del cron de la watchlist de ganchos. Imprime la fuente y la estimación, y luego lanza. Con el navegador o con Instaloader el coste impreso es 0,00 USD. `--skip-transcribe` y `--skip-llm` saltan esos pasos. `--source` vale `playwright`, `apify`, `instaloader` o `auto`.
 
 ## Docker y cron
 
