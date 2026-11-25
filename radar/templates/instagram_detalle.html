@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="back"><a href="/instagram">Volver al radar de Instagram</a></p>
+<article class="sheet">
+  <p class="eyebrow">{{ cuenta.nicho or "Sin nicho" }}{% if cuenta.subnicho %} · {{ cuenta.subnicho }}{% endif %}</p>
+  <h1>@{{ cuenta.handle }}</h1>
+  <p class="lede">{{ cuenta.nombre or "Sin nombre leído" }}</p>
+  <div class="chips">
+    <span class="chip">{{ cuenta.estado }}</span>
+    {% if cuenta.idioma %}<span class="chip quiet">{{ cuenta.idioma }}</span>{% endif %}
+    {% if cuenta.verificado %}<span class="chip quiet">verificado {{ cuenta.verificado }}</span>{% endif %}
+  </div>
+  <dl class="metrics">
+    <div><dt>Seguidores</dt><dd>{{ cuenta.seguidores|es_int }}</dd></div>
+    <div><dt>Mediana</dt><dd>{{ cuenta.mediana_vistas|es_int }}</dd></div>
+    <div><dt>Mejor reel</dt><dd>{{ cuenta.mejor_pieza_vistas|es_int }}</dd></div>
+    <div><dt>Múltiplo</dt><dd>{{ cuenta.mejor_pieza_multiplo|multiple }}</dd></div>
+    <div><dt>Virales</dt><dd>{{ cuenta.num_piezas_virales if cuenta.num_piezas_virales is not none else "—" }}</dd></div>
+    <div><dt>Virales no fijados</dt><dd>{{ cuenta.num_virales_no_fijadas if cuenta.num_virales_no_fijadas is not none else "—" }}</dd></div>
+    <div><dt>Mejor fijado</dt><dd>{{ cuenta.mejor_pieza_fijada or "—" }}</dd></div>
+    <div><dt>Reels en la mediana</dt><dd>{{ cuenta.reels_muestreados if cuenta.reels_muestreados is not none else "—" }}</dd></div>
+    <div><dt>Detectado</dt><dd>{{ cuenta.fecha_detectada|es_date }}</dd></div>
+    <div><dt>Actualizado</dt><dd>{{ cuenta.fecha_actualizada|es_date }}</dd></div>
+  </dl>
+  {% if cuenta.bio %}<p>{{ cuenta.bio }}</p>{% endif %}
+  {% if cuenta.enlace %}<p><a href="{{ cuenta.enlace }}" rel="noreferrer">{{ cuenta.enlace }}</a></p>{% endif %}
+  <p><a href="{{ cuenta.url }}" rel="noreferrer">Abrir el perfil</a></p>
+  {% if cuenta.mejor_pieza_url %}
+  <p><a href="{{ cuenta.mejor_pieza_url }}" rel="noreferrer">Mejor reel</a></p>
+  {% endif %}
+  {% if cuenta.motivo %}<p class="fine">Motivo: {{ cuenta.motivo }}</p>{% endif %}
+  <p class="fine">{{ cuenta.clasificacion }}</p>
+  <p class="fine">{{ cuenta.fuente }}</p>
+  <p class="fine">Semilla: {{ cuenta.semilla or "—" }}</p>
+  {% if cuenta.piezas_virales %}
+  <h2>Reels virales leídos</h2>
+  <ul class="steps">
+    {% for pieza in piezas %}
+    <li><a href="{{ pieza.url }}" rel="noreferrer">{{ pieza.resto or pieza.url }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</article>
+{% endblock %}

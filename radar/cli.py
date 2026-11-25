@@ -27,6 +27,7 @@ from radar.sources.instaloader_source import (
     InstaloaderNotInstalled,
     login_secondary_account,
 )
+from radar.instagram.fuente import InstagramBloqueado, InstagramSesionAusente
 from radar.sources.playwright_source import (
     BrowserBlocked,
     BrowserNotConfigured,
@@ -173,6 +174,51 @@ def main(argv: list[str] | None = None) -> int:
     semilla.add_argument("--tipo", default=None, choices=("keyword", "handle", "hashtag", "url"))
     cuentas_sub.add_parser("semillas", help="Lista las semillas activas")
 
+    creadores = sub.add_parser("creadores", help="Radar de creadores de Instagram del nicho de IA")
+    creadores_sub = creadores.add_subparsers(dest="creadores_command", required=True)
+    ig_descubrir = creadores_sub.add_parser("descubrir", help="Busca creadores nuevos y lee su pestaña Reels")
+    ig_descubrir.add_argument("--yes", action="store_true", help="Abre Instagram. Sin esto solo enseña el plan")
+    ig_descubrir.add_argument("--max", type=int, default=None, help="Perfiles a leer en esta pasada")
+    ig_descubrir.add_argument("--paginas", type=int, default=None, help="Páginas de hashtag o listas a abrir")
+    ig_descubrir.add_argument("--sin-llm", action="store_true", help="Clasifica solo con la heurística")
+    ig_descubrir.add_argument("--semilla", action="append", default=[], help="keyword, @usuario, #hashtag o https://...")
+    ig_descubrir.add_argument("--pausa", default=None, help="Pausa al azar entre perfiles, mínimo-máximo en segundos")
+    ig_descubrir.add_argument("--apify", action="store_true", help="Opcional. Sin token ni actor no llama a Apify")
+    ig_actualizar = creadores_sub.add_parser("actualizar", help="Vuelve a leer creadores que ya califican")
+    ig_actualizar.add_argument("--yes", action="store_true")
+    ig_actualizar.add_argument("--max", type=int, default=None)
+    ig_actualizar.add_argument("--handle", default=None)
+    ig_actualizar.add_argument("--sin-llm", action="store_true")
+    ig_actualizar.add_argument("--pausa", default=None)
+    ig_ciclo = creadores_sub.add_parser("ciclo", help="Descubre y, si Instagram no bloquea, actualiza")
+    ig_ciclo.add_argument("--yes", action="store_true")
+    ig_ciclo.add_argument("--max", type=int, default=None)
+    ig_ciclo.add_argument("--sin-llm", action="store_true")
+    ig_ciclo.add_argument("--pausa", default=None)
+    ig_ciclo.add_argument("--apify", action="store_true")
+    ig_exportar = creadores_sub.add_parser("exportar", help="CSV con las columnas del corte")
+    ig_exportar.add_argument("--out", default="-")
+    ig_exportar.add_argument("--todas", action="store_true", help="Incluye candidatas y descartadas")
+    ig_importar = creadores_sub.add_parser("importar", help="Importa un CSV. Sin ruta, carga el corte incluido")
+    ig_importar.add_argument("path", nargs="?", default=None)
+    ig_listar = creadores_sub.add_parser("listar", help="Lista los creadores guardados")
+    ig_listar.add_argument("--nicho", default=None)
+    ig_listar.add_argument("--subnicho", default=None)
+    ig_listar.add_argument("--idioma", default=None)
+    ig_listar.add_argument("--min-vistas", type=int, default=None)
+    ig_listar.add_argument("--min-seguidores", type=int, default=None)
+    ig_listar.add_argument("--min-multiplo", type=float, default=None)
+    ig_listar.add_argument("--estado", default="califica")
+    ig_listar.add_argument("--q", default=None)
+    ig_programar = creadores_sub.add_parser("programar", help="Comando del Programador de tareas de Windows")
+    ig_programar.add_argument("--hora", default="07:30")
+    ig_programar.add_argument("--tarea", default="RadarCreadoresInstagram")
+    ig_programar.add_argument("--instalar", action="store_true", help="En Windows, registra la tarea")
+    ig_semilla = creadores_sub.add_parser("semilla", help="Añade una semilla de descubrimiento")
+    ig_semilla.add_argument("valor")
+    ig_semilla.add_argument("--tipo", default=None, choices=("keyword", "handle", "hashtag", "url"))
+    creadores_sub.add_parser("semillas", help="Lista las semillas activas")
+
     accounts = sub.add_parser("accounts", help="Watchlist de cuentas")
     account_sub = accounts.add_subparsers(dest="account_command", required=True)
     account_sub.add_parser("list")
@@ -220,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
             return _accounts(db, args)
         if args.command == "cuentas":
             return _cuentas(db, settings, args)
+        if args.command == "creadores":
+            return _creadores(db, settings, args)
     except (
         MissingApifyToken,
         OverBudget,
@@ -233,6 +281,8 @@ def main(argv: list[str] | None = None) -> int:
         PlaywrightNotInstalled,
         FlujoError,
         UsernameError,
+        InstagramSesionAusente,
+        InstagramBloqueado,
         ValueError,
         OSError,
     ) as exc:
@@ -548,6 +598,111 @@ def _cuentas(db: Database, settings, args) -> int:
             pausa=pausa,
         )
     elif args.cuentas_command == "actualizar":
+        informe = ejecutar_actualizacion(
+            db,
+            settings,
+            permitir_red=args.yes,
+            max_cuentas=args.max,
+            handle=args.handle,
+            sin_llm=args.sin_llm,
+            pausa=pausa,
+        )
+    else:
+        informe = ejecutar_ciclo(
+            db,
+            settings,
+            permitir_red=args.yes,
+            max_cuentas=args.max,
+            sin_llm=args.sin_llm,
+            usar_apify=args.apify,
+            pausa=pausa,
+        )
+    print(informe.mensaje)
+    if informe.status == "error":
+        return 2
+    return 0
+
+
+def _creadores(db: Database, settings, args) -> int:
+    from radar.instagram.csvio import SEMILLA_CSV, exportar_csv, importar_csv, importar_semilla_si_falta
+    from radar.instagram.descubrir import ejecutar_actualizacion, ejecutar_ciclo, ejecutar_descubrimiento
+    from radar.instagram.programar import instalar_tarea, preparar_tarea
+    from radar.instagram.store import anadir_semilla, asegurar_semillas_defecto, listar_cuentas, listar_semillas
+
+    if args.creadores_command == "importar":
+        ruta = args.path or SEMILLA_CSV
+        total = importar_csv(db, ruta)
+        print(f"Importados {total} creadores desde {ruta}.")
+        return 0
+    importar_semilla_si_falta(db)
+    if args.creadores_command == "exportar":
+        estado = "todas" if args.todas else "califica"
+        texto = exportar_csv(db, None if args.out == "-" else args.out, estado=estado)
+        if args.out == "-":
+            sys.stdout.write(texto)
+        else:
+            print(f"Escrito {args.out}")
+        return 0
+    if args.creadores_command == "listar":
+        cuentas = listar_cuentas(
+            db,
+            nicho=args.nicho,
+            subnicho=args.subnicho,
+            idioma=args.idioma,
+            estado=args.estado,
+            min_vistas=args.min_vistas,
+            min_seguidores=args.min_seguidores,
+            min_multiplo=args.min_multiplo,
+            q=args.q,
+        )
+        if not cuentas:
+            print("Ningún creador con esos filtros.")
+            return 0
+        for cuenta in cuentas:
+            vistas = cuenta.get("mejor_pieza_vistas")
+            vistas_txt = "—" if vistas is None else str(vistas)
+            multiplo = cuenta.get("mejor_pieza_multiplo")
+            multiplo_txt = "—" if multiplo is None else f"{float(multiplo):.1f}×"
+            seguidores = cuenta.get("seguidores")
+            seguidores_txt = "—" if seguidores is None else str(seguidores)
+            print(
+                f"@{cuenta['handle']}  {cuenta.get('subnicho') or '—'}  "
+                f"{cuenta.get('idioma') or '—'}  {seguidores_txt}  {vistas_txt}  {multiplo_txt}"
+            )
+        return 0
+    if args.creadores_command == "semillas":
+        asegurar_semillas_defecto(db)
+        for semilla in listar_semillas(db):
+            print(f"{semilla['tipo']}  {semilla['valor']}")
+        return 0
+    if args.creadores_command == "semilla":
+        tipo, valor = _tipo_semilla(args.valor, args.tipo)
+        anadir_semilla(db, tipo, valor)
+        print(f"Semilla {tipo}: {valor}")
+        return 0
+    if args.creadores_command == "programar":
+        programa = preparar_tarea(hora=args.hora, tarea=args.tarea)
+        print(programa.script)
+        print(programa.comando)
+        if args.instalar:
+            print(instalar_tarea(programa))
+        return 0
+    for texto in getattr(args, "semilla", []) or []:
+        tipo, valor = _tipo_semilla(texto, None)
+        anadir_semilla(db, tipo, valor)
+    pausa = _pausa(args.pausa) if getattr(args, "pausa", None) else None
+    if args.creadores_command == "descubrir":
+        informe = ejecutar_descubrimiento(
+            db,
+            settings,
+            permitir_red=args.yes,
+            max_cuentas=args.max,
+            max_paginas=args.paginas,
+            sin_llm=args.sin_llm,
+            usar_apify=args.apify,
+            pausa=pausa,
+        )
+    elif args.creadores_command == "actualizar":
         informe = ejecutar_actualizacion(
             db,
             settings,

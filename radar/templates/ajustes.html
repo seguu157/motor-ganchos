@@ -54,6 +54,10 @@
     <dd>perfil {{ settings.browser_profile }} · sesión {{ "lista" if navegador_listo else "no lista" }} · máximo {{ settings.browser_max_accounts }} cuentas y {{ settings.browser_max_posts }} posts · pausa de cuentas {{ settings.browser_pause_account[0]|int }}-{{ settings.browser_pause_account[1]|int }} s</dd>
   </div>
   <div>
+    <dt>Creadores de Instagram</dt>
+    <dd>misma sesión del navegador · hasta {{ settings.ig_creadores_max }} perfiles y {{ settings.ig_creadores_max_paginas }} páginas · pausa {{ settings.ig_creadores_pause[0]|int }}-{{ settings.ig_creadores_pause[1]|int }} s · suelo {{ settings.ig_creadores_vistas_min }} reproducciones · {{ settings.ig_creadores_reels }} reels para la mediana</dd>
+  </div>
+  <div>
     <dt>Peso de un comentario</dt>
     <dd>{{ settings.comment_weight }} me gusta. Solo entra en la mediana de carruseles.</dd>
   </div>

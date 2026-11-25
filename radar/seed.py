@@ -213,9 +213,11 @@ def seed_examples(db: Database) -> None:
 
 def seed_if_needed(db: Database) -> bool:
     """Siembra una sola vez, y solo cuando todavía no hay cuentas."""
+    from radar.instagram.csvio import importar_semilla_si_falta as importar_ig_si_falta
     from radar.tiktok.csvio import importar_semilla_si_falta
 
     importar_semilla_si_falta(db)
+    importar_ig_si_falta(db)
     if db.get_meta("seeded") == "1":
         return False
     if db.count_accounts() == 0:
