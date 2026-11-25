@@ -252,6 +252,51 @@ def test_extraer_en_seco_no_pide_nada_y_salta_fijadas_y_lo_ya_leido(settings, tm
     assert llamadas.count("https://www.tiktok.com/@app.estudio/photo/alta") == 1
 
 
+def test_el_maximo_salta_lo_ya_leido_y_sigue_con_la_siguiente(settings, tmp_path):
+    db = fresh_db(tmp_path)
+    guardar_tiktok(
+        db,
+        _cuenta_tiktok(
+            piezas_virales=(
+                "https://www.tiktok.com/@app.estudio/photo/alta | 80,000 vistas | 80.0× ; "
+                "https://www.tiktok.com/@app.estudio/photo/media | 40,000 vistas | 40.0×"
+            )
+        ),
+    )
+    llamadas: list[str] = []
+
+    def leer(url: str) -> LecturaFoto:
+        llamadas.append(url)
+        return LecturaFoto(caption="pie", imagenes=["https://p16.tiktokcdn.com/a.jpeg"], origen="pagina")
+
+    def ocr(_path: Path) -> str:
+        return "StudyApp ahora"
+
+    def bajar(_url: str, workdir: Path, indice: int) -> Path:
+        destino = workdir / f"diapositiva-{indice}.img"
+        destino.write_bytes(b"x")
+        return destino
+
+    opciones = {
+        "fuente": "tiktok",
+        "maximo": 1,
+        "permitir_red": True,
+        "leer_tiktok": leer,
+        "ocr": ocr,
+        "descargar": bajar,
+        "dormir": lambda _segundos: None,
+    }
+    primera = ejecutar(db, settings, **opciones)
+    assert primera.leidas == 1
+    assert llamadas == ["https://www.tiktok.com/@app.estudio/photo/alta"]
+    segunda = ejecutar(db, settings, **opciones)
+    assert segunda.leidas == 1
+    assert llamadas == [
+        "https://www.tiktok.com/@app.estudio/photo/alta",
+        "https://www.tiktok.com/@app.estudio/photo/media",
+    ]
+
+
 def test_instagram_para_si_la_sesion_bloquea_y_no_transcribe_un_fijado(settings, tmp_path):
     db = fresh_db(tmp_path)
     from radar.instagram.store import guardar_cuenta as guardar_ig
@@ -460,6 +505,63 @@ def test_analizar_salta_lo_hecho_y_para_en_el_limite(settings, tmp_path):
     assert aviso["formato"] == "lista"
     assert aviso["warnings"]
     assert "40" in aviso["warnings"][0]
+
+
+def test_un_analisis_fallido_se_reintenta_en_la_siguiente_pasada(settings, tmp_path):
+    from radar.llm import LLMError
+
+    db = fresh_db(tmp_path)
+    guardar_pieza(
+        db,
+        {
+            "fuente": "instagram",
+            "url": "https://www.instagram.com/reel/BIGREEL/",
+            "handle": "creador.ia",
+            "nicho": "IA",
+            "subnicho": "Herramientas IA",
+            "vistas": 80_000,
+            "mediana": 10_000,
+            "multiplo": 8.0,
+            "caption": "herramientas de IA",
+            "transcripcion": "Para en tres segundos.",
+            "gancho_texto": "Para en tres segundos.",
+            "estado": "extraida",
+            "extraida_en": "2026-11-25T00:00:00+00:00",
+        },
+    )
+
+    class _Fallo:
+        def complete(self, _sistema: str, _usuario: str) -> str:
+            raise LLMError("El modelo no devolvió JSON válido.")
+
+        def close(self) -> None:
+            return None
+
+    class _Bien:
+        def complete(self, _sistema: str, _usuario: str) -> str:
+            return json.dumps(
+                {
+                    "hook": "Para en tres segundos.",
+                    "hook_type": "pregunta",
+                    "formato": "tutorial",
+                    "estructura": "Promesa y demostración.",
+                    "insercion_producto": "No se nombra un producto.",
+                    "angulo": "Prisa.",
+                    "por_que": "La primera frase corta el scroll.",
+                    "plantilla": "En tres segundos, [X].",
+                    "adaptacion": "Sugerencia: [X]",
+                }
+            )
+
+        def close(self) -> None:
+            return None
+
+    fallo = analizar(db, settings, permitir=True, cliente=_Fallo(), dormir=lambda _s: None)
+    assert fallo.analizados == 0
+    assert fallo.pendientes == 1
+    reintento = analizar(db, settings, permitir=True, cliente=_Bien(), dormir=lambda _s: None)
+    assert reintento.analizados == 1
+    assert next(pieza for pieza in listar(db) if "BIGREEL" in pieza["url"])["formato"] == "tutorial"
 
 
 def test_la_web_filtra_y_el_ranking_enlaza_la_pieza(settings, tmp_path):

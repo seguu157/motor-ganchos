@@ -151,8 +151,9 @@ def _cola(db: Database, fuente: str, maximo: int | None, settings: Settings) -> 
         cuentas = _cuentas(db, nombre)
         todas.extend(candidatas_de_cuentas(cuentas, fuente=nombre))
     todas.sort(key=lambda pieza: (-(pieza.multiplo if pieza.multiplo is not None else -1), -(pieza.vistas or -1), pieza.url))
+    hechas = _ya_extraidas(db)
     fijadas = [pieza for pieza in todas if pieza.fijada]
-    sueltas = [pieza for pieza in todas if not pieza.fijada]
+    sueltas = [pieza for pieza in todas if not pieza.fijada and (pieza.fuente, pieza.url) not in hechas]
     if maximo is None:
         tope_tt = settings.tt_max_cuentas
         tope_ig = settings.ig_creadores_max
@@ -171,6 +172,12 @@ def _cola(db: Database, fuente: str, maximo: int | None, settings: Settings) -> 
                 n_ig += 1
         return elegidas, fijadas
     return sueltas[: max(maximo, 0)], fijadas
+
+
+def _ya_extraidas(db: Database) -> set[tuple[str, str]]:
+    with db.connect() as conn:
+        filas = conn.execute("SELECT fuente, url FROM gh_piezas WHERE estado = 'extraida'").fetchall()
+    return {(fila["fuente"], fila["url"]) for fila in filas}
 
 
 def _cuentas(db: Database, fuente: str) -> list[dict]:

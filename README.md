@@ -460,7 +460,7 @@ Sin `--yes`, `extraer` y `analizar` solo enseñan el plan. No hay peticiones ni 
 
 **Análisis.** Lo hace el mismo Codex de la suscripción de ChatGPT (`codex exec`), una pieza cada vez, con la pausa `RADAR_LLM_DELAY_SECONDS`. De cada pieza pide el gancho (primera diapositiva, o lo dicho en los primeros segundos más el texto en pantalla), el tipo, el formato (lista, antes y después, historia en primera persona, cosas que me hubiera gustado saber, mito y verdad, tutorial, comparación…), cómo entra el producto, el ángulo, por qué encaja con el material y una plantilla con `[X]`. La adaptación al perfil de `radar perfil` se guarda como **sugerencia**: no es una métrica. Si el modelo mete una cifra que no estaba en la pieza, la ficha lo avisa.
 
-Lo ya analizado se salta. Si Codex responde límite de uso, la tanda para y la próxima ejecución sigue por las que faltan. El ranking agrupa por nicho y subnicho: cuántas piezas y la mediana de su múltiplo guardado. Cada fila enlaza la URL de la pieza. No se calcula un múltiplo nuevo.
+Lo ya analizado se salta. Una pieza cuyo JSON no valió sigue pendiente y entra en la siguiente pasada. Si Codex responde límite de uso, la tanda para y la próxima ejecución sigue por las que faltan. El tope `--max` cuenta solo piezas que aún no se han leído, así que cada pasada avanza por la cola. El ranking agrupa por nicho y subnicho: cuántas piezas y la mediana de su múltiplo guardado. Cada fila enlaza la URL de la pieza. No se calcula un múltiplo nuevo.
 
 `exportar --out` escribe Markdown y CSV. Si `--out` es una carpeta, crea `ganchos.md` y `ganchos.csv`. Si es un `.md` o un `.csv`, escribe los dos al lado.
 

@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass, field
 
 from radar.config import Settings
-from radar.db import Database, utc_now
+from radar.db import Database
 from radar.ganchos.store import borrar_analisis, guardar_analisis, pendientes_de_analisis
 from radar.llm import HOOK_TYPES, LLMError, _load_json
 from radar.llm_codex import CodexNotInstalled, CodexNotLoggedIn, CodexRateLimit, client_for_settings
@@ -128,11 +128,7 @@ def analizar(
                 )
             except LLMError as exc:
                 borrar_analisis(db, int(pieza["id"]))
-                guardar_analisis(
-                    db,
-                    int(pieza["id"]),
-                    {"error": str(exc), "analizado_en": utc_now()},
-                )
+                guardar_analisis(db, int(pieza["id"]), {"error": str(exc), "analizado_en": ""})
                 continue
             datos["provider"] = settings.llm_provider
             datos["model"] = settings.llm_model or settings.codex_model or ""
